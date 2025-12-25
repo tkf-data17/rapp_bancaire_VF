@@ -21,12 +21,15 @@ def executer_rapprochement(path_banque, path_compta, path_etat_prec=None, output
     # On force les colonnes Debit et Credit en numérique pour éviter les erreurs de calcul
     df_banque = pd.read_excel(path_banque)
     
+    # Normalisation des noms de colonnes pour la banque (Débit -> debit, Crédit -> credit)
+    df_banque.rename(columns=lambda x: str(x).lower().replace('é', 'e'), inplace=True)
+    
     # Nettoyage : Suppression de la ligne "Solde précédent" si présente
     # On cherche dans les colonnes de type texte la mention "Solde précédent" et on exclut ces lignes
     for col in df_banque.select_dtypes(include=['object']).columns:
         df_banque = df_banque[~df_banque[col].astype(str).str.contains("Solde précédent", case=False, na=False)]
 
-    df_compta = pd.read_excel(path_compta, header=1)
+    df_compta = pd.read_excel(path_compta, header=0)
 
     # Normalisation des noms de colonnes pour la compta (Débit -> debit, Crédit -> credit)
     df_compta.rename(columns=lambda x: str(x).lower().replace('é', 'e'), inplace=True)
@@ -172,14 +175,14 @@ def executer_rapprochement(path_banque, path_compta, path_etat_prec=None, output
     cols_to_drop_banque = [c for c in suspens_banque.columns if 'solde' in str(c).lower()]
     suspens_banque_export = suspens_banque.drop(columns=cols_to_drop_banque)
     
-    cols_to_drop_compta = [c for c in suspens_compta.columns if 'solde' in str(c).lower()]
+    cols_to_drop_compta = [c for c in suspens_compta.columns if 'solde' in str(c).lower() or 'unnamed' in str(c).lower()]
     suspens_compta_export = suspens_compta.drop(columns=cols_to_drop_compta)
 
-    # Nettoyage de la date pour le journal (enlever l'heure)
+    # Nettoyage de la date pour le journal (enlever l'heure et format JJ/MM/AAAA)
     col_date_compta = next((c for c in suspens_compta_export.columns if 'date' in str(c).lower()), None)
     if col_date_compta:
         try:
-            suspens_compta_export[col_date_compta] = pd.to_datetime(suspens_compta_export[col_date_compta], errors='coerce').dt.date
+            suspens_compta_export[col_date_compta] = pd.to_datetime(suspens_compta_export[col_date_compta], errors='coerce').dt.strftime('%d/%m/%Y')
         except Exception as e:
             print(f"Attention: Impossible de formater la date pour le journal : {e}")
 
@@ -200,14 +203,17 @@ def executer_rapprochement(path_banque, path_compta, path_etat_prec=None, output
         def get_last_solde(df, file_label):
             col_solde = next((c for c in df.columns if str(c).lower().strip() == 'solde'), None)
             if col_solde:
-                return df[col_solde].iloc[-1]
+                # On prend la dernière valeur valide (non NaN)
+                series_valid = df[col_solde].dropna()
+                if not series_valid.empty:
+                    return series_valid.iloc[-1]
             return 0
 
         # On relit les fichiers sources pour les soldes
         df_banque_raw = pd.read_excel(path_banque)
         solde_banque = get_last_solde(df_banque_raw, "banque")
 
-        df_compta_raw = pd.read_excel(path_compta, header=1)
+        df_compta_raw = pd.read_excel(path_compta, header=0)
         solde_compta = get_last_solde(df_compta_raw, "compta")
 
         # Chargement du classeur de sortie pour ajout de la feuille

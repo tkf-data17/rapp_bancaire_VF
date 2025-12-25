@@ -23,9 +23,9 @@ css_code = """
         display: none;
     }
 
-    /* Ajustement du conteneur principal pour éviter le chevauchement avec notre titre fixe */
+    /* Ajustement du conteneur principal */
     .block-container {
-        padding-top: 120px !important; /* Marge pour laisser la place au titre fixe */
+        padding-top: 80px !important; 
     }
 
     /* Styles pour le titre fixé en haut */
@@ -133,7 +133,8 @@ css_code = """
     }
 
     /* Mise en forme de la zone drag & drop du file uploader */
-    section[data-testid="stFileUploader"] {
+    /* Mise en forme de la zone drag & drop du file uploader */
+    [data-testid="stFileUploader"] {
         background-color: #fafafa;
         padding: 10px;
         border-radius: 8px;
@@ -141,7 +142,15 @@ css_code = """
         text-align: center;
     }
 
-    section[data-testid="stFileUploader"] > div {
+    /* Cache le texte 'Limit 200MB per file' */
+    [data-testid="stFileUploader"] small {
+        display: none !important;
+    }
+
+    [data-testid="stFileUploader"] > div {
+        padding-top: 10px !important;
+        padding-bottom: 10px !important;
+    }
         padding-top: 10px !important;
         padding-bottom: 10px !important;
     }
@@ -190,6 +199,29 @@ css_code = """
     /* Lignes de séparation */
     hr {
         border-color: #dfe6e9;
+    }
+    /* --- LOGO TEXTUEL --- */
+    .logo-container {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+    }
+    .logo-main {
+        font-family: 'Poppins', sans-serif;
+        color: #2c3e50;
+        font-weight: 700;
+        font-size: 2.5rem;
+        line-height: 1.1;
+        margin: 0;
+    }
+    .logo-sub {
+        font-family: 'Roboto', sans-serif;
+        color: #6c5ce7;
+        font-size: 0.85rem;
+        margin-top: -2px;
+        font-weight: 500;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
     }
 </style>
 """

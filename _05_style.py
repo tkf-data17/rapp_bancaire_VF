@@ -70,28 +70,43 @@ css_code = """
         border-right: 1px solid #e0e0e0;
     }
 
-    /* --- BOUTONS --- */
+    /* --- BOUTONS MODERNES --- */
     .stButton > button {
-        background-color: #6c5ce7; /* Violet doux mais dynamique */
+        /* Dégradé: Bleu nuit -> Violet -> Touche de Vert Menthe/Emeraude */
+        background: linear-gradient(135deg, #2c3e50 0%, #6c5ce7 70%, #00b894 100%);
         color: white;
         border: none;
-        border-radius: 8px;
-        padding: 10px 24px;
+        border-radius: 12px;
+        padding: 0.6rem 1.5rem;
         font-size: 16px;
-        font-weight: 500;
-        transition: all 0.3s ease;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+        box-shadow: 0 4px 6px rgba(44, 62, 80, 0.3);
+        width: auto;
+        text-transform: uppercase;
+        font-size: 0.9rem;
     }
 
     .stButton > button:hover {
-        background-color: #a29bfe; /* Version plus claire au survol */
+        /* On éclaircit tout au survol */
+        background: linear-gradient(135deg, #34495e 0%, #7d6de3 70%, #55efc4 100%);
         transform: translateY(-2px);
-        box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        box-shadow: 0 7px 14px rgba(44, 62, 80, 0.4);
         color: white;
     }
 
     .stButton > button:active {
-        transform: translateY(0);
+        transform: translateY(1px);
+        box-shadow: 0 2px 4px rgba(44, 62, 80, 0.3);
+    }
+
+    /* Style spécifique pour le bouton secondaire (ex: S'inscrire) si géré via st.form_submit_button sans type='primary' ?
+       Streamlit applique par défaut un style simple. On peut cibler button[kind="secondary"] si besoin, 
+       mais .stButton > button cible tout le monde. 
+       On peut ajouter une bordure blanche fine pour le relief. */
+    .stButton > button {
+        border: 1px solid rgba(255,255,255,0.1);
     }
 
     /* --- INPUTS (Selectbox, DateInput, FileUploader) --- */
@@ -222,6 +237,54 @@ css_code = """
         font-weight: 500;
         letter-spacing: 0.5px;
         text-transform: uppercase;
+    }
+
+    /* --- SIDEBAR FIXE (Non redimensionnable, non repliable) --- */
+    /* Cache le bouton de fermeture de la sidebar */
+    [data-testid="stSidebarCollapsedControl"] {
+        display: none;
+    }
+    
+    /* Cache la poignée de redimensionnement */
+    /* Ciblage approximatif de la div de resize qui est frère de stSidebar */
+    div[data-testid="stSidebarUserContent"] {
+        padding-top: 2rem; /* Ajustement esthétique */
+    }
+    
+    /* Pour Streamlit récent, le resize handle peut être ciblé différemment ou difficilement.
+       On tente une approche générique sur les éléments de redimensionnement */
+    div[data-testid="stSidebar"] + div {
+        display: none;
+    }
+
+    /* Bouton Logout dans le header */
+    .logout-btn-header {
+        margin-left: auto; /* Pousse à droite */
+        margin-right: 30px;
+        background: linear-gradient(135deg, #ff7675 0%, #d63031 100%);
+        color: white !important;
+        padding: 6px 16px;
+        border-radius: 20px;
+        text-decoration: none;
+        font-size: 0.75rem; /* Taille réduite */
+        font-weight: 500;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        transition: all 0.3s ease;
+        border: 1px solid rgba(255,255,255,0.2);
+    }
+    .logout-btn-header:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        opacity: 0.9;
+    }
+
+    /* Espacement entre les options du bouton radio (Menu Navigation) */
+    div[data-testid="stRadio"] > div[role="radiogroup"] > label {
+        margin-bottom: 20px !important;
+        background-color: transparent !important;
+    }
+    div[data-testid="stRadio"] > div[role="radiogroup"] > label:last-child {
+        margin-bottom: 0px !important;
     }
 </style>
 """

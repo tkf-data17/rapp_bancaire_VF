@@ -107,7 +107,7 @@ else:
     # --- BARRE LATERALE ---
     st.sidebar.markdown(f"**Utilisateur :** {st.session_state.user_email}")
     st.sidebar.button("Nouvel ER", on_click=reset_callback)
-    if st.sidebar.button("Se déconnecter"):
+    if st.sidebar.button("Log out"):
         logout()
         st.rerun()
 

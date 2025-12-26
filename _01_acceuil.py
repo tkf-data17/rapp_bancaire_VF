@@ -107,7 +107,21 @@ if not st.session_state.authenticated:
                 reg_email = st.text_input("Email", key="reg_email")
                 reg_nom = st.text_input("Nom", key="reg_nom")
                 reg_prenoms = st.text_input("Prénoms", key="reg_prenoms")
-                reg_tel = st.text_input("N° telephone", key="reg_tel")
+                
+                # Zone Téléphone avec indicatif
+                col_ind, col_tel = st.columns([1, 3])
+                with col_ind:
+                    indicatifs = [
+                        "+1", "+20", "+27", "+33", "+211", "+212", "+213", "+216", "+218", "+220", "+221", "+222", "+223", "+224", "+225", 
+                        "+226", "+227", "+228", "+229", "+230", "+231", "+232", "+233", "+234", "+235", "+236", "+237", "+238", "+239", 
+                        "+240", "+241", "+242", "+243", "+244", "+245", "+246", "+248", "+249", "+250", "+251", "+252", "+253", "+254", 
+                        "+255", "+256", "+257", "+258", "+260", "+261", "+262", "+263", "+264", "+265", "+266", "+267", "+268", "+269", 
+                        "+291", "+297", "+298", "+299"
+                    ]
+                    phone_code = st.selectbox("Indicatif", indicatifs, key="reg_ind")
+                with col_tel:
+                    phone_number = st.text_input("N° telephone (Sans indicatif)", key="reg_tel_num")
+                
                 reg_ent = st.text_input("Nom de l'entreprise", key="reg_ent")
                 reg_pass = st.text_input("Mot de passe", type="password", key="reg_pass")
                 reg_pass_confirm = st.text_input("Confirmer le mot de passe", type="password", key="reg_pass_conf")
@@ -117,12 +131,13 @@ if not st.session_state.authenticated:
                 if reg_pass != reg_pass_confirm:
                     st.error("Les mots de passe ne correspondent pas.")
                 else:
-                    success, msg = auth_manager.register_user(reg_email, reg_pass, reg_nom, reg_prenoms, reg_tel, reg_ent)
+                    full_phone = f"{phone_code} {phone_number}"
+                    success, msg = auth_manager.register_user(reg_email, reg_pass, reg_nom, reg_prenoms, full_phone, reg_ent)
                     if success:
                         st.success(msg)
                         time.sleep(2)
                         # On vide les champs manuellement
-                        keys_to_clear = ["reg_email", "reg_nom", "reg_prenoms", "reg_tel", "reg_ent", "reg_pass", "reg_pass_conf"]
+                        keys_to_clear = ["reg_email", "reg_nom", "reg_prenoms", "reg_tel_num", "reg_ent", "reg_pass", "reg_pass_conf"]
                         for key in keys_to_clear:
                             if key in st.session_state:
                                 del st.session_state[key]
@@ -144,7 +159,7 @@ else:
     st.sidebar.markdown(f"**Crédit :** {user_credits}")
     
     # Navigation
-    nav = st.sidebar.radio("Navigation", ["Accueil", "Mes rapprochements"], key="nav_selection")
+    nav = st.sidebar.radio("Navigation", ["Accueil", "Mes rapprochements", "Maquette"], key="nav_selection")
     
     st.sidebar.markdown("---")
 
@@ -189,57 +204,103 @@ else:
                 h4.markdown("<div style='font-weight:bold; color:#2c3e50; font-size:1.1rem;'>Télécharger</div>", unsafe_allow_html=True)
                 st.markdown("<hr style='margin: 5px 0; border: 2px solid #2c3e50;'>", unsafe_allow_html=True)
 
-            # Lignes du tableau
-            for idx, item in enumerate(reversed(history)):
-                with st.container():
-                    c1, c2, c3, c4 = st.columns([2, 3, 1, 1])
-                    date_gen = item.get('date_gen', 'N/A')
-                    banque = item.get('banque', 'Inconnue')
-                    pdf_path = item.get('url_pdf') or item.get('pdf_path', '')
-                    excel_path = item.get('url_excel') or item.get('excel_path', '')
-                    
-                    # Alignement vertical du texte
-                    c1.markdown(f"<div style='padding-top: 10px;'>{date_gen}</div>", unsafe_allow_html=True)
-                    c2.markdown(f"<div style='padding-top: 10px;'>{banque}</div>", unsafe_allow_html=True)
-                    
-                    if pdf_path:
-                        if pdf_path.startswith("http"):
-                             # Lien vers le stockage cloud (Supabase)
-                             # Bouton Aperçu (Ouvre dans nouvel onglet)
-                             c3.markdown(f'<a href="{pdf_path}" target="_blank" style="text-decoration: none;"><button style="border: 1px solid #2196F3; background-color: white; color: #2196F3; padding: 5px 10px; border-radius: 5px; cursor: pointer;">👁️</button></a>', unsafe_allow_html=True)
-                             
-                             # Bouton Télécharger (Ouvre aussi dans nouvel onglet car c'est un lien direct)
-                             # Ou on peut essayer de forcer le téléchargement si le navigateur le permet, mais target_blank est standard pour PDF.
-                             # On change juste le label pour différencier.
-                             # Pour un vrai "download" silencieux cross-origin, c'est compliqué sans proxy.
-                             # Ici on met un bouton explicite "Télécharger" qui pointe vers le même lien.
-                             c4.markdown(f'<a href="{pdf_path}" target="_blank" style="text-decoration: none;"><button style="border: 1px solid #4CAF50; background-color: white; color: #4CAF50; padding: 5px 10px; border-radius: 5px; cursor: pointer;">⇩</button></a>', unsafe_allow_html=True)
-                             
-                        elif os.path.exists(pdf_path):
-                            # Fichier local
-                            with open(pdf_path, "rb") as f:
-                                c3.download_button(
-                                    label="⇩",
-                                    data=f,
-                                    file_name=os.path.basename(pdf_path),
-                                    mime="application/pdf",
-                                    key=f"dl_pdf_{idx}"
-                                )
-                                c4.write("") # Pas d'aperçu simple pour fichiers locaux sans serveur de fichiers static
+            # Lignes du tableau (Conteneur scrollable)
+            # Utilisation de height=... pour fixer la zone et permettre le scroll vertical
+            # tout en gardant l'en-tête (défini au dessus) fixe.
+            with st.container(height=500):
+                for idx, item in enumerate(reversed(history)):
+                    with st.container():
+                        c1, c2, c3, c4 = st.columns([2, 3, 1, 1])
+                        date_gen = item.get('date_gen', 'N/A')
+                        banque = item.get('banque', 'Inconnue')
+                        pdf_path = item.get('url_pdf') or item.get('pdf_path', '')
+                        excel_path = item.get('url_excel') or item.get('excel_path', '')
+                        
+                        # Alignement vertical du texte
+                        c1.markdown(f"<div style='padding-top: 10px;'>{date_gen}</div>", unsafe_allow_html=True)
+                        c2.markdown(f"<div style='padding-top: 10px;'>{banque}</div>", unsafe_allow_html=True)
+                        
+                        if pdf_path:
+                            if pdf_path.startswith("http"):
+                                 # Lien vers le stockage cloud (Supabase)
+                                 # Bouton Aperçu (Ouvre dans nouvel onglet)
+                                 c3.markdown(f'<a href="{pdf_path}" target="_blank" style="text-decoration: none;"><button style="border: 1px solid #2196F3; background-color: white; color: #2196F3; padding: 5px 10px; border-radius: 5px; cursor: pointer;">👁️</button></a>', unsafe_allow_html=True)
+                                 
+                                 # Bouton Télécharger (Ouvre aussi dans nouvel onglet car c'est un lien direct)
+                                 # Ou on peut essayer de forcer le téléchargement si le navigateur le permet, mais target_blank est standard pour PDF.
+                                 # On change juste le label pour différencier.
+                                 # Pour un vrai "download" silencieux cross-origin, c'est compliqué sans proxy.
+                                 # Ici on met un bouton explicite "Télécharger" qui pointe vers le même lien.
+                                 c4.markdown(f'<a href="{pdf_path}" target="_blank" style="text-decoration: none;"><button style="border: 1px solid #4CAF50; background-color: white; color: #4CAF50; padding: 5px 10px; border-radius: 5px; cursor: pointer;">⇩</button></a>', unsafe_allow_html=True)
+                                 
+                            elif os.path.exists(pdf_path):
+                                # Fichier local
+                                with open(pdf_path, "rb") as f:
+                                    c3.download_button(
+                                        label="⇩",
+                                        data=f,
+                                        file_name=os.path.basename(pdf_path),
+                                        mime="application/pdf",
+                                        key=f"dl_pdf_{idx}"
+                                    )
+                                    c4.write("") # Pas d'aperçu simple pour fichiers locaux sans serveur de fichiers static
+                            else:
+                                c3.markdown("<span style='color: grey;'>-</span>", unsafe_allow_html=True)
+                                c4.markdown("<span style='color: grey;'>-</span>", unsafe_allow_html=True)
                         else:
                             c3.markdown("<span style='color: grey;'>-</span>", unsafe_allow_html=True)
                             c4.markdown("<span style='color: grey;'>-</span>", unsafe_allow_html=True)
-                    else:
-                        c3.markdown("<span style='color: grey;'>-</span>", unsafe_allow_html=True)
-                        c4.markdown("<span style='color: grey;'>-</span>", unsafe_allow_html=True)
-                        
-                    # Séparateur de ligne
-                    
-                    # Séparateur de ligne
-                    st.markdown("<hr style='margin: 0; border: 0; border-top: 1px solid #e0e0e0;'>", unsafe_allow_html=True)
+                            
+
+                        # Séparateur de ligne
+                        st.markdown("<hr style='margin: 0; border: 0; border-top: 1px solid #e0e0e0;'>", unsafe_allow_html=True)
         
         st.markdown('</div>', unsafe_allow_html=True)
         st.stop() # Arrête l'exécution ici pour ne pas afficher le formulaire "Nouveau"
+
+    # --- VIEW: MAQUETTE ---
+    if nav == "Maquette":
+        st.markdown('<div class="main-content" style="margin-top: -60px;">', unsafe_allow_html=True)
+        st.markdown("<h3>Maquettes</h3>", unsafe_allow_html=True)
+        st.markdown("<p>Téléchargez les modèles de fichiers nécessaires pour vos rapprochements ci-dessous.</p>", unsafe_allow_html=True)
+        
+        maquette_dir = "maquette"
+        if os.path.exists(maquette_dir):
+            files = [f for f in os.listdir(maquette_dir) if os.path.isfile(os.path.join(maquette_dir, f))]
+            
+            if not files:
+                st.info("Aucun fichier disponible dans le dossier maquette.")
+            else:
+                # Création d'une grille pour l'affichage (optionnel, ou liste simple)
+                for file_name in files:
+                    file_path = os.path.join(maquette_dir, file_name)
+                    
+                    # Détermination du mime type approximatif
+                    mime_type = "application/octet-stream"
+                    if file_name.endswith(".xlsx"):
+                        mime_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    elif file_name.endswith(".pdf"):
+                        mime_type = "application/pdf"
+                    
+                    col_file, col_btn = st.columns([3, 1])
+                    with col_file:
+                        st.markdown(f"**{file_name}**")
+                    with col_btn:
+                        with open(file_path, "rb") as f:
+                            st.download_button(
+                                label="Télécharger",
+                                data=f,
+                                file_name=file_name,
+                                mime=mime_type,
+                                key=f"dl_maquette_{file_name}"
+                            )
+                    st.markdown("<hr style='margin: 5px 0; border: 0; border-top: 1px solid #eee;'>", unsafe_allow_html=True)
+
+        else:
+            st.error(f"Le dossier '{maquette_dir}' est introuvable.")
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+        st.stop()
 
     # --- VIEW: ACCUEIL ---
     # --- FORMULAIRE PRINCIPAL ---

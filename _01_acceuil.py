@@ -12,11 +12,11 @@ import time
 import config
 import importlib
 
-importlib.reload(style)
-importlib.reload(auth_manager)
+# importlib.reload(style)
+# importlib.reload(auth_manager)
 
-importlib.reload(style) # Force le rechargement du style à chaque run
-importlib.reload(auth_manager) # Force le rechargement de l'auth
+# importlib.reload(style) # Force le rechargement du style à chaque run
+# importlib.reload(auth_manager) # Force le rechargement de l'auth
 
 
 # Configuration de la page
@@ -47,6 +47,7 @@ if "logout" in st.query_params:
     st.query_params.clear() # Nettoie l'URL
 
 
+@st.cache_data(ttl=3600*24) # Cache pour 24h, le logo change rarement
 def get_img_as_base64(file):
     with open(file, "rb") as f:
         data = f.read()
@@ -99,7 +100,7 @@ if not st.session_state.authenticated:
                     st.rerun()
                 else:
                     st.error(msg)
-
+                    
         # --- TAB INSCRIPTION ---
         with tab_signup:
             st.subheader("Créer un compte")
@@ -136,11 +137,13 @@ if not st.session_state.authenticated:
                     if success:
                         st.success(msg)
                         time.sleep(2)
+                        
                         # On vide les champs manuellement
-                        keys_to_clear = ["reg_email", "reg_nom", "reg_prenoms", "reg_tel_num", "reg_ent", "reg_pass", "reg_pass_conf"]
+                        keys_to_clear = ["reg_email", "reg_nom", "reg_prenoms", "reg_tel_num", "reg_ent", "reg_pass", "reg_pass_conf", "reg_ind"]
                         for key in keys_to_clear:
                             if key in st.session_state:
                                 del st.session_state[key]
+                        
                         st.rerun()
                     else:
                         st.error(msg)
@@ -153,13 +156,18 @@ else:
     st.sidebar.title("Menu")
     
     # Crédits
-    user_credits = auth_manager.get_credits(st.session_state.user_email)
-    user_name = auth_manager.get_user_name(st.session_state.user_email)
+    user_id = st.session_state.get('user_id')
+    user_credits = auth_manager.get_credits(user_id)
+    user_name = auth_manager.get_user_name(user_id, st.session_state.user_email)
     st.sidebar.markdown(f"**Utilisateur :** {user_name}")
     st.sidebar.markdown(f"**Crédit :** {user_credits}")
     
     # Navigation
-    nav = st.sidebar.radio("Navigation", ["Accueil", "Mes rapprochements", "Maquette"], key="nav_selection")
+    menu_options = ["Accueil", "Mes rapprochements", "Maquette"]
+    if auth_manager.is_admin(user_id):
+        menu_options.append("Administration")
+        
+    nav = st.sidebar.radio("Navigation", menu_options, key="nav_selection")
     
     st.sidebar.markdown("---")
 
@@ -190,7 +198,7 @@ else:
         st.markdown('<div class="main-content" style="margin-top: -60px;">', unsafe_allow_html=True)
         st.markdown("<h3>Mes Rapprochements</h3>", unsafe_allow_html=True)
         
-        history = auth_manager.get_history(st.session_state.user_email)
+        history = auth_manager.get_history(user_id)
         
         if not history:
             st.info("Aucun rapprochement effectué pour le moment.")
@@ -302,6 +310,82 @@ else:
         st.markdown('</div>', unsafe_allow_html=True)
         st.stop()
 
+    # --- VIEW: ADMINISTRATION ---
+    if nav == "Administration":
+        if not auth_manager.is_admin(user_id):
+            st.error("Accès refusé.")
+            st.stop()
+            
+        st.markdown('<div class="main-content" style="margin-top: -60px;">', unsafe_allow_html=True)
+        st.markdown("<h3>🛡️ Administration</h3>", unsafe_allow_html=True)
+        st.markdown("<p>Gestion des utilisateurs et des crédits.</p>", unsafe_allow_html=True)
+        
+        users = auth_manager.get_all_users()
+        
+        if not users:
+            st.warning("Impossible de charger la liste des utilisateurs (vérifiez la clé service_role).")
+        else:
+            # Création d'une liste formatée pour le selectbox
+            # On utilise le nom, prénoms et ID pour identifier
+            user_options = {f"{u.get('nom','Inconnu')} {u.get('prenoms','Inconnu')} - {u.get('credits',0)} crédits (ID: {u.get('id', '')[:8]}...)": u['id'] for u in users}
+            selected_label = st.selectbox("Sélectionner un utilisateur", list(user_options.keys()))
+            
+            if selected_label:
+                selected_uid = user_options[selected_label]
+                selected_user = next((u for u in users if u['id'] == selected_uid), None)
+                
+                # Card info user
+                st.info(f"**Utilisateur sélectionné :** {selected_user.get('nom','')} {selected_user.get('prenoms','')}\n\n**Entreprise :** {selected_user.get('entreprise', 'N/A')}\n\n**Téléphone :** {selected_user.get('telephone', 'N/A')}")
+                
+                col_cred1, col_cred2, col_cred3 = st.columns([1, 1, 1])
+                with col_cred1:
+                     st.metric("Crédits actuels", selected_user.get('credits', 0))
+                
+                with col_cred2:
+                    credits_to_add = st.number_input("Ajustement (+/-)", value=0, step=1, key=f"cred_adj_{selected_uid}")
+                
+                with col_cred3:
+                    st.write("") 
+                    st.write("") 
+                    if st.button("Valider l'ajustement", type="primary", key=f"btn_valid_{selected_uid}"):
+                        if credits_to_add != 0:
+                            success, msg = auth_manager.admin_update_credits(selected_uid, credits_to_add)
+                            if success:
+                                st.success(msg)
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error(msg)
+                        else:
+                            st.warning("Veuillez saisir une valeur différente de 0.")
+
+                st.markdown("---")
+                
+                with st.expander("Zone de danger (Suppression)"):
+                    st.warning("Attention : La suppression est irréversible.")
+                    if st.button("Supprimer cet utilisateur", type="secondary", key=f"btn_del_init_{selected_uid}"):
+                        st.session_state[f"confirm_delete_{selected_uid}"] = True
+                        
+                    if st.session_state.get(f"confirm_delete_{selected_uid}"):
+                         st.error(f"Êtes-vous VRAIMENT sûr de vouloir supprimer {selected_user.get('nom','')} ?")
+                         col_del1, col_del2 = st.columns(2)
+                         with col_del1:
+                             if st.button("OUI, Supprimer", key=f"btn_del_confirm_{selected_uid}"):
+                                 success, msg = auth_manager.admin_delete_user(selected_uid)
+                                 if success:
+                                     st.success(msg)
+                                     time.sleep(2)
+                                     st.rerun()
+                                 else:
+                                     st.error(msg)
+                         with col_del2:
+                             if st.button("Annuler", key=f"btn_del_cancel_{selected_uid}"):
+                                 st.session_state[f"confirm_delete_{selected_uid}"] = False
+                                 st.rerun()
+
+        st.markdown('</div>', unsafe_allow_html=True)
+        st.stop()
+
     # --- VIEW: ACCUEIL ---
     # --- FORMULAIRE PRINCIPAL ---
     
@@ -335,7 +419,7 @@ else:
     
     # Bouton de validation
     if st.button("Valider"):
-        if auth_manager.get_credits(st.session_state.user_email) <= 0:
+        if auth_manager.get_credits(user_id) <= 0:
             st.error("Crédits insuffisants. Vous ne pouvez plus faire de rapprochements.")
             st.stop()
 
@@ -348,6 +432,7 @@ else:
         if missing_files:
             st.error(f"Veuillez charger les fichiers manquants : {', '.join(missing_files)}")
         else:
+            start_time = time.time()
             with st.spinner('Traitement en cours...'):
                 try:
                     # Préparation des données en mémoire (sans sauvegarde des inputs)
@@ -396,7 +481,6 @@ else:
                         finally:
                             # Nettoyage facultatif du PDF uploadé
                             pass 
-
                     else:
                         # Si l'utilisateur force un Excel (non recommandé vu la consigne, mais robuste)
                         df_releve = load_input(releve_file)
@@ -435,19 +519,22 @@ else:
                          )
 
                     # Mise à jour Crédits et Historique
-                    auth_manager.decrement_credits(st.session_state.user_email)
+                    auth_manager.decrement_credits(user_id)
                     
                     date_display = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
                     
                     # On sauvegarde les URLs publiques dans l'historique
                     # Note: Si l'upload échoue (url=None), on aura None en base, ce qui est acceptable pour l'instant.
-                    auth_manager.add_history_remote(st.session_state.user_email, {
+                    auth_manager.add_history_remote(user_id, {
                         'url_excel': url_excel,
                         'url_pdf': url_pdf,
                         'banque': choix_banque,
                         'date_gen': date_display 
                     })
 
+
+                    end_time = time.time()
+                    duration = end_time - start_time
 
                     # Stockage des résultats dans la session pour persistance
                     st.session_state['processed_data'] = {
@@ -456,7 +543,8 @@ else:
                         'stats': stats,
                         'nom_fichier_sortie': nom_fichier_sortie,
                         'pdf_filename': pdf_filename,
-                        'choix_banque': choix_banque
+                        'choix_banque': choix_banque,
+                        'duration': duration
                     }
                     
                 except Exception as e:
@@ -473,9 +561,8 @@ else:
         stats = data['stats']
         nom_fichier_sortie = data['nom_fichier_sortie']
         pdf_filename = data['pdf_filename']
-        choix_banque = data['choix_banque']
-
-        st.success(f"Rapprochement terminé pour {choix_banque} !")
+        duration = data.get('duration', 0)
+        st.success(f"Rapprochement terminé pour {choix_banque} ! (durée de traitement : {duration:.2f} s)")
         if stats:
              st.info(f"Suspendus : Banque ({stats.get('suspens_banque', 0)}), Compta ({stats.get('suspens_compta', 0)})")
         

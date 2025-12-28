@@ -74,10 +74,15 @@ recovery_access_token = query_params.get("access_token", None)
 recovery_refresh_token = query_params.get("refresh_token", None)
 recovery_type = query_params.get("type", None)
 
-if recovery_type == "recovery" and recovery_access_token:
+# Debug temporaire pour comprendre ce qui arrive
+# if query_params.get("auth_redirect"):
+#     st.write("Debug Auth Params:", query_params)
+
+if (recovery_type == "recovery" or "access_token" in query_params) and recovery_access_token:
     # On a les tokens dans l'URL (suite au rechargement JS), on tente la connexion
     try:
         # On authentifie l'utilisateur avec ces tokens
+        # st.info("Validation du token de récupération en cours...")
         res = auth_manager.supabase.auth.set_session(recovery_access_token, recovery_refresh_token)
         if res and res.user:
             st.session_state.authenticated = True
@@ -90,28 +95,44 @@ if recovery_type == "recovery" and recovery_access_token:
     except Exception as e:
         st.error(f"Erreur de validation du lien de récupération : {e}")
 
-# Script JS d'interception
+# Script JS d'interception amélioré
+# Il va scanner le hash pour trouver access_token et type=recovery
+# Et rediriger vers l'URL propre avec query params
 st.markdown("""
 <script>
-// On vérifie le hash
-const hash = window.location.hash;
-if (hash && hash.includes("type=recovery")) {
-    // On extrait les paramètres du hash
-    const urlParams = new URLSearchParams(hash.substring(1)); // Enlève le #
-    const accessToken = urlParams.get("access_token");
-    const refreshToken = urlParams.get("refresh_token");
-    const type = urlParams.get("type");
+console.log("Supabase Auth Listener Active");
 
-    if (accessToken && type === "recovery") {
-        // On redirige vers la même page mais avec des query params que Streamlit peut lire
-        // On vide le hash pour ne pas boucler
-        const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + 
-                       "?type=recovery&access_token=" + accessToken + "&refresh_token=" + refreshToken;
+const hash = window.location.hash;
+console.log("Current Hash:", hash);
+
+if (hash && hash.includes("access_token")) {
+    console.log("Tokens detected in hash, processing...");
+    
+    // Parser le hash
+    const params = new URLSearchParams(hash.substring(1));
+    const accessToken = params.get("access_token");
+    const refreshToken = params.get("refresh_token");
+    const type = params.get("type");
+    
+    console.log("Type:", type);
+    
+    // On redirige si on trouve un access token (quel que soit le type pour l'instant, ou filtré sur recovery)
+    if (accessToken) {
+        // Construction de la nouvelle URL
+        // On conserve le pathname actuel
+        const baseUrl = window.location.origin + window.location.pathname;
+        
+        // On ajoute les params nécessaires pour Streamlit
+        // Note: On ajoute un param 'auth_redirect=true' pour identifier ce reload
+        const newUrl = `${baseUrl}?auth_redirect=true&access_token=${accessToken}&refresh_token=${refreshToken || ''}&type=${type || 'recovery'}`;
+        
+        console.log("Redirecting to:", newUrl);
         window.location.href = newUrl;
     }
 }
 </script>
 """, unsafe_allow_html=True)
+
 
 
 # --- UI STYLES ---

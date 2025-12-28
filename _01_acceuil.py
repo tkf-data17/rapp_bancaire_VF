@@ -29,9 +29,12 @@ if 'user_email' not in st.session_state:
     st.session_state.user_email = ""
 if 'reset_key' not in st.session_state:
     st.session_state.reset_key = 0
+if 'show_profile' not in st.session_state:
+    st.session_state.show_profile = False
 
 def reset_callback():
     st.session_state.reset_key += 1
+    # On reste sur la vue actuelle sauf si on veut forcer l'accueil
     st.session_state.nav_selection = "Accueil"
     if 'processed_data' in st.session_state:
         del st.session_state['processed_data']
@@ -100,6 +103,20 @@ if not st.session_state.authenticated:
                     st.rerun()
                 else:
                     st.error(msg)
+            
+            st.write("")
+            with st.expander("Mot de passe oublié ?"):
+                st.write("Entrez votre email pour recevoir un lien de réinitialisation.")
+                reset_email = st.text_input("Votre Email", key="reset_email_input")
+                if st.button("Envoyer le lien"):
+                    if reset_email:
+                        success, msg = auth_manager.send_password_reset(reset_email)
+                        if success:
+                            st.success(msg)
+                        else:
+                            st.error(msg)
+                    else:
+                        st.warning("Veuillez entrer une adresse email.")
                     
         # --- TAB INSCRIPTION ---
         with tab_signup:
@@ -163,9 +180,10 @@ else:
     st.sidebar.markdown(f"**Crédit :** {user_credits}")
     
     # Navigation
-    menu_options = ["Accueil", "Mes rapprochements", "Maquette"]
+    # On utilise des espaces insécables ou simplement du texte brut. Le Markdown fonctionne dans st.radio pour les versions récentes
+    menu_options = ["Accueil", "Mes rapprochements", "Maquette", "**Mon Profil**", "Nous contacter"]
     if auth_manager.is_admin(user_id):
-        menu_options.append("Administration")
+        menu_options.append("Admin")
         
     nav = st.sidebar.radio("Navigation", menu_options, key="nav_selection")
     
@@ -309,9 +327,64 @@ else:
         
         st.markdown('</div>', unsafe_allow_html=True)
         st.stop()
+    
+    # --- VIEW: MON PROFIL ---
+    if nav == "**Mon Profil**":
+        st.markdown('<div class="main-content" style="margin-top: -60px;">', unsafe_allow_html=True)
+        st.markdown("<h3>Mon Profil</h3>", unsafe_allow_html=True)
+        
+        # Charge les infos
+        current_profile = auth_manager.get_user_profile(user_id)
+        
+        if not current_profile:
+            st.error("Impossible de charger le profil.")
+        else:
+            with st.form("profile_form"):
+                st.subheader("Informations Personnelles")
+                col_p1, col_p2 = st.columns(2)
+                with col_p1:
+                    new_nom = st.text_input("Nom", value=current_profile.get('nom', ''))
+                    new_tel = st.text_input("Téléphone", value=current_profile.get('telephone', ''))
+                with col_p2:
+                    new_prenoms = st.text_input("Prénoms", value=current_profile.get('prenoms', ''))
+                    new_ent = st.text_input("Entreprise", value=current_profile.get('entreprise', ''))
+                
+                st.markdown("<br>", unsafe_allow_html=True)
+                btn_update = st.form_submit_button("Mettre à jour", type="primary")
+            
+            if btn_update:
+                success, msg = auth_manager.update_user_profile(user_id, new_nom, new_prenoms, new_tel, new_ent)
+                if success:
+                    st.success(msg)
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error(msg)
+                    
+        st.markdown('</div>', unsafe_allow_html=True)
+        st.stop()
+
+    # --- VIEW: NOUS CONTACTER ---
+    if nav == "Nous contacter":
+        st.markdown('<div class="main-content" style="margin-top: -60px;">', unsafe_allow_html=True)
+        st.markdown("<h3>Nous contacter</h3>", unsafe_allow_html=True)
+        
+        st.markdown("""
+        <div style="padding: 20px; background-color: #f8f9fa; border-radius: 10px; margin-top: 20px; border: 1px solid #ddd;">
+            <p style="font-size: 1.1rem; margin-bottom: 15px; color: #2c3e50;">
+                📞 <strong>Contact :</strong> +228 97031387
+            </p>
+            <p style="font-size: 1.1rem; color: #2c3e50;">
+                ✉️ <strong>Email :</strong> <a href="mailto:tayif01@gmail.com" style="text-decoration: none; color: #2980b9;">tayif01@gmail.com</a>
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+        st.stop()
 
     # --- VIEW: ADMINISTRATION ---
-    if nav == "Administration":
+    if nav == "Admin":
         if not auth_manager.is_admin(user_id):
             st.error("Accès refusé.")
             st.stop()

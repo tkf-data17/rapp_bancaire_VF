@@ -85,6 +85,40 @@ def get_history(user_id):
     except Exception as e:
         return []
 
+# --- 5b. PROFIL UTILISATEUR (CACHÉ) ---
+@st.cache_data(ttl=60)
+def get_user_profile(user_id):
+    """Récupère le profil complet de l'utilisateur."""
+    if not user_id: return None
+    client = _get_authenticated_client()
+    try:
+        data = client.table("user_profiles").select("*").eq("id", user_id).single().execute()
+        return data.data
+    except Exception as e:
+        return None
+
+def update_user_profile(user_id, nom, prenoms, telephone, entreprise):
+    """Met à jour les informations du profil utilisateur."""
+    client = _get_authenticated_client()
+    if not client: return False, "Erreur client"
+    try:
+        data = {
+            "nom": nom,
+            "prenoms": prenoms,
+            "telephone": telephone,
+            "entreprise": entreprise
+        }
+        client.table("user_profiles").update(data).eq("id", user_id).execute()
+        
+        # Invalidation des caches
+        get_user_profile.clear()
+        get_user_name.clear()
+        get_all_users.clear()
+        
+        return True, "Profil mis à jour avec succès."
+    except Exception as e:
+        return False, f"Erreur mise à jour : {e}"
+
 # --- 6. ACTIONS (SANS CACHE car elles modifient la DB) ---
 
 def login_user(email, password):
@@ -139,6 +173,16 @@ def decrement_credits(user_id):
     except:
         pass
     return False
+
+def send_password_reset(email):
+    """Envoie un email de réinitialisation de mot de passe."""
+    if not supabase: return False, "Erreur connexion DB"
+    try:
+        # Note: ceci envoie un email avec un lien de redirection. Configuration du Redirect URL nécessaire dans Supabase.
+        supabase.auth.reset_password_email(email)
+        return True, "Email de réinitialisation envoyé ! Vérifiez votre boîte de réception."
+    except Exception as e:
+        return False, f"Erreur lors de l'envoi : {e}"
 
 def add_history_remote(user_id, file_info):
     client = _get_authenticated_client()

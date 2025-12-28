@@ -178,11 +178,30 @@ def send_password_reset(email):
     """Envoie un email de réinitialisation de mot de passe."""
     if not supabase: return False, "Erreur connexion DB"
     try:
-        # Note: ceci envoie un email avec un lien de redirection. Configuration du Redirect URL nécessaire dans Supabase.
-        supabase.auth.reset_password_email(email)
-        return True, "Email de réinitialisation envoyé ! Vérifiez votre boîte de réception."
+        # On essaie de récupérer l'URL de l'application depuis les secrets (configuration pour la prod)
+        # Sinon on fallback sur localhost ou None (laissant Supabase utiliser son Site URL par défaut)
+        try:
+            site_url = st.secrets["app"]["url"]
+        except:
+             # Si pas de secret configurer, mieux vaut ne rien envoyer et laisser Supabase gérer avec son "Site URL"
+             # OU mettre localhost par défaut pour le dev local
+             site_url = None
+        
+        options = {"redirect_to": site_url} if site_url else {}
+        supabase.auth.reset_password_email(email, options=options)
+        
+        return True, "Email de réinitialisation envoyé ! Vérifiez votre boîte de réception (et les spams)."
     except Exception as e:
         return False, f"Erreur lors de l'envoi : {e}"
+
+def update_password(new_password):
+    """Met à jour le mot de passe de l'utilisateur connecté."""
+    if not supabase: return False, "Erreur connexion DB"
+    try:
+        supabase.auth.update_user({"password": new_password})
+        return True, "Mot de passe modifié avec succès !"
+    except Exception as e:
+        return False, f"Erreur modification mot de passe : {e}"
 
 def add_history_remote(user_id, file_info):
     client = _get_authenticated_client()

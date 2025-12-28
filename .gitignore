@@ -3,6 +3,7 @@
 .env
 .streamlit/secrets.toml
 
+supabase/.temp/
 # --- Virtual Environments ---
 .venv/
 venv/

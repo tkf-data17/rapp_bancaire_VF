@@ -63,12 +63,96 @@ try:
 except Exception:
     img_tag = ""
 
+# --- HACK: Récupération du Hash URL pour OAuth/Reset Password ---
+# Streamlit ne voit pas le hash (#) de l'URL côté serveur.
+# On injecte du JS pour détecter le hash de récupération (type=recovery)
+# et recharger la page avec les tokens en query params (?recovery_token=...)
+
+# On vérifie si on a déjà capturé les tokens via query params
+query_params = st.query_params
+recovery_access_token = query_params.get("access_token", None)
+recovery_refresh_token = query_params.get("refresh_token", None)
+recovery_type = query_params.get("type", None)
+
+if recovery_type == "recovery" and recovery_access_token:
+    # On a les tokens dans l'URL (suite au rechargement JS), on tente la connexion
+    try:
+        # On authentifie l'utilisateur avec ces tokens
+        res = auth_manager.supabase.auth.set_session(recovery_access_token, recovery_refresh_token)
+        if res and res.user:
+            st.session_state.authenticated = True
+            st.session_state.user_email = res.user.email
+            st.session_state.user_id = res.user.id
+            st.session_state.password_reset_mode = True # Drapeau pour afficher le formulaire de changement
+            # On nettoie l'URL pour la propreté
+            st.query_params.clear()
+            st.rerun()
+    except Exception as e:
+        st.error(f"Erreur de validation du lien de récupération : {e}")
+
+# Script JS d'interception
+st.markdown("""
+<script>
+// On vérifie le hash
+const hash = window.location.hash;
+if (hash && hash.includes("type=recovery")) {
+    // On extrait les paramètres du hash
+    const urlParams = new URLSearchParams(hash.substring(1)); // Enlève le #
+    const accessToken = urlParams.get("access_token");
+    const refreshToken = urlParams.get("refresh_token");
+    const type = urlParams.get("type");
+
+    if (accessToken && type === "recovery") {
+        // On redirige vers la même page mais avec des query params que Streamlit peut lire
+        // On vide le hash pour ne pas boucler
+        const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + 
+                       "?type=recovery&access_token=" + accessToken + "&refresh_token=" + refreshToken;
+        window.location.href = newUrl;
+    }
+}
+</script>
+""", unsafe_allow_html=True)
+
+
 # --- UI STYLES ---
 st.markdown(style.css_code, unsafe_allow_html=True)
 
 # ==============================================================================
 # PAGE D'AUTHENTIFICATION (Si non connecté)
 # ==============================================================================
+# ==============================================================================
+# PAGE D'AUTHENTIFICATION (Si non connecté)
+# ==============================================================================
+
+# Cas Spécial : Si on est en mode Reset Password (connecté via lien magique)
+if st.session_state.get('password_reset_mode', False):
+    st.markdown(f"<div style='text-align: center; margin-bottom: 0px;'>{img_tag}</div>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align: center;'>Réinitialisation du mot de passe</h2>", unsafe_allow_html=True)
+    
+    with st.form("new_password_form"):
+        st.info("Veuillez définir votre nouveau mot de passe.")
+        new_pass = st.text_input("Nouveau mot de passe", type="password")
+        new_pass_conf = st.text_input("Confirmer le mot de passe", type="password")
+        btn_change = st.form_submit_button("Changer le mot de passe", type="primary")
+        
+    if btn_change:
+        if new_pass != new_pass_conf:
+            st.error("Les mots de passe ne correspondent pas.")
+        elif len(new_pass) < 6:
+            st.error("Le mot de passe doit faire au moins 6 caractères.")
+        else:
+            success, msg = auth_manager.update_password(new_pass)
+            if success:
+                st.success(msg)
+                st.session_state.password_reset_mode = False # On quitte le mode reset
+                time.sleep(2)
+                st.rerun()
+            else:
+                st.error(msg)
+    
+    st.stop() # On affiche QUE ça
+
+
 if not st.session_state.authenticated:
     
     # Centre le contenu

@@ -34,9 +34,10 @@ def get_supabase_client() -> Client:
               get_config("supabase", "api_key", "SUPABASE_API_KEY")
 
         if not url or not key:
-            # On ne lève pas d'erreur immédiatement pour éviter de casser l'app si les secrets ne sont pas encore chargés au boot
-            # Mais on loggue ou on renvoie None
-            print("Supabase URL or Key missing.")
+            # Initialisation échouée : On l'affiche clairement pour le débogage sur le cloud
+            error_msg = "❌ Configuration Supabase incomplète. Les variables d'environnement 'SUPABASE_URL' et 'SUPABASE_KEY' sont introuvables."
+            print(error_msg)
+            st.error(error_msg)
             return None
 
         # Fix warning: Storage endpoint URL should have a trailing slash

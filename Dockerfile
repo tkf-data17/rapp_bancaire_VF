@@ -29,8 +29,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Exposer le port par défaut de Streamlit
-EXPOSE 8501
+EXPOSE 8000
 
 # Définir la commande de démarrage
 # On précise l'adresse 0.0.0.0 pour être accessible depuis l'extérieur du conteneur
-CMD ["streamlit", "run", "_01_acceuil.py", "--server.port=8501", "--server.address=0.0.0.0"]
+CMD ["sh", "-c", "python -m streamlit run _01_acceuil.py --server.port ${PORT} --server.address 0.0.0.0"]

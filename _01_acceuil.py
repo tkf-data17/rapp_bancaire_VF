@@ -729,9 +729,7 @@ else:
                                     status.update(label="Échec de l'extraction", state="error")
                                     st.error("L'extraction du PDF a échoué (Résultat vide). Vérifiez si le PDF est valide.")
                                     st.stop()
-                            else:
-                                st.error("L'extraction du PDF a échoué (Résultat vide). Vérifiez si le PDF est valide.")
-                                st.stop()
+
                                 
                         except Exception as e:
                             st.error(f"Erreur CRITIQUE lors de l'analyse du PDF : {e}")

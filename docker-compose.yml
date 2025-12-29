@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  streamlit-app:
+    build: .
+    container_name: rapp_bancaire_app
+    ports:
+      - "8501:8501"
+    volumes:
+      # Injecter les secrets ADAPTÉS POUR DOCKER (avec host.docker.internal)
+      # On le renomme 'secrets.toml' à l'intérieur du conteneur pour que Streamlit le trouve.
+      - ./.streamlit/secrets_docker.toml:/app/.streamlit/secrets.toml
+      # (Optionnel) Monter les dossiers temporaires si on veut voir les fichiers extraits sur l'hôte
+      - ./temp_proc:/app/temp_proc
+      - ./temp_uploads:/app/temp_uploads
+    environment:
+      # Permet de voir les logs Python immédiatement
+      - PYTHONUNBUFFERED=1
+

@@ -60,7 +60,9 @@ def run_extraction_pipeline(input_pdf_path):
     ocr_result_dir = generate_ocr_split(input_pdf_path, ocr_output_dir)
     
     if not ocr_result_dir:
-        raise RuntimeError("Échec de l'étape OCR.")
+        print("❌ CRITICAL: OCR result dir is None. Tesseract execution failed.")
+        # On essaie de lever une erreur claire pour l'UI
+        raise RuntimeError("Échec Critique de l'OCR. Tesseract est introuvable ou mal configuré. Vérifier les logs.")
         
     print(f"✅ Étape 1 terminée. Pages disponibles dans : {ocr_result_dir}")
 

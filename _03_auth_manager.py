@@ -3,16 +3,46 @@ from supabase import create_client, Client
 import datetime
 
 # --- 1. INITIALISATION AVEC CACHE ---
+import os
+
+def get_config(section, key, env_var_name=None):
+    """Récupère une config depuis st.secrets ou os.environ."""
+    # 1. Essai via st.secrets (Priorité Dev Local)
+    try:
+        if section in st.secrets and key in st.secrets[section]:
+            return st.secrets[section][key]
+    except Exception:
+        pass
+    
+    # 2. Essai via os.environ (Priorité Prod / Docker)
+    if env_var_name:
+         val = os.environ.get(env_var_name)
+         if val: return val
+         
+    return None
+
 # On utilise cache_resource pour que le client soit créé UNE SEULE FOIS pour toute la session
 @st.cache_resource
 def get_supabase_client() -> Client:
     try:
-        url = st.secrets["supabase"]["url"]
+        # Récupération URL
+        url = get_config("supabase", "url", "SUPABASE_URL")
+        
+        # Récupération Key (Plusieurs variantes possibles)
+        key = get_config("supabase", "key", "SUPABASE_KEY") or \
+              get_config("supabase", "anon_key", "SUPABASE_ANON_KEY") or \
+              get_config("supabase", "api_key", "SUPABASE_API_KEY")
+
+        if not url or not key:
+            # On ne lève pas d'erreur immédiatement pour éviter de casser l'app si les secrets ne sont pas encore chargés au boot
+            # Mais on loggue ou on renvoie None
+            print("Supabase URL or Key missing.")
+            return None
+
         # Fix warning: Storage endpoint URL should have a trailing slash
-        if url and not url.endswith("/"):
+        if not url.endswith("/"):
              url += "/"
              
-        key = st.secrets["supabase"]["key"]
         return create_client(url, key)
     except Exception as e:
         st.error(f"Erreur de configuration Supabase : {e}")
@@ -34,13 +64,15 @@ def _get_authenticated_client():
 def _get_admin_client():
     """Crée un client Supabase avec les droits d'admin (service_role)."""
     try:
-        url = st.secrets["supabase"]["url"]
+        url = get_config("supabase", "url", "SUPABASE_URL")
         if url and not url.endswith("/"):
              url += "/"
              
-        key = st.secrets["supabase"].get("service_role")
+        key = get_config("supabase", "service_role", "SUPABASE_SERVICE_ROLE") or \
+              get_config("supabase", "service_role_key", "SUPABASE_SERVICE_ROLE_KEY")
+              
         if not key:
-            print("DEBUG: 'service_role' key NOT FOUND in secrets!")
+            print("DEBUG: 'service_role' key NOT FOUND in secrets/env!")
             return None
         return create_client(url, key)
     except Exception as e:
@@ -180,12 +212,8 @@ def send_password_reset(email):
     try:
         # On essaie de récupérer l'URL de l'application depuis les secrets (configuration pour la prod)
         # Sinon on fallback sur localhost ou None (laissant Supabase utiliser son Site URL par défaut)
-        try:
-            site_url = st.secrets["app"]["url"]
-        except:
-             # Si pas de secret configurer, mieux vaut ne rien envoyer et laisser Supabase gérer avec son "Site URL"
-             # OU mettre localhost par défaut pour le dev local
-             site_url = None
+        # On essaie de récupérer l'URL de l'application depuis les secrets ou env
+        site_url = get_config("app", "url", "APP_URL")
         
         options = {"redirect_to": site_url} if site_url else {}
         supabase.auth.reset_password_email(email, options=options)
@@ -272,13 +300,15 @@ def admin_update_credits(target_user_id, amount):
         new_total = max(0, current + amount)
         
         # Ecrire
+        # Ecrire
         client.table("user_profiles").update({"credits": new_total}).eq("id", target_user_id).execute()
-        # Invalider le cache pour que tout le monde voit la maj
-        get_all_users.clear()
+        
+        # Optimisation : On ne clear PAS la liste globale (trop lent), on clear juste le crédit unitaire
+        # get_all_users.clear() <--- Retiré pour performance
         get_credits.clear()
-        return True, f"Crédits mis à jour : {new_total}"
+        return True, f"Crédits mis à jour : {new_total}", new_total
     except Exception as e:
-        return False, f"Erreur update: {e}"
+        return False, f"Erreur update: {e}", 0
 
 def admin_delete_user(target_user_id):
     """Supprime un utilisateur via Auth Admin (Admin only)."""
@@ -286,6 +316,14 @@ def admin_delete_user(target_user_id):
     if not client: return False, "Clé Service Role manquante"
     
     try:
+        # 1. Suppression des données liées (Cascading manuel pour sécurité)
+        try:
+             client.table("reconciliation_history").delete().eq("user_id", target_user_id).execute()
+             client.table("user_profiles").delete().eq("id", target_user_id).execute()
+        except:
+             pass # Si échec, on tente quand même la suppression Auth (le cascade SQL peut prendre le relais)
+
+        # 2. Suppression du compte Auth
         client.auth.admin.delete_user(target_user_id)
         get_all_users.clear()
         return True, "Utilisateur supprimé."

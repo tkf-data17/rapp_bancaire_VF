@@ -374,6 +374,7 @@ def analyze_and_export(df: pd.DataFrame, output_prefix: str = "transactions", so
             df_export[col] = pd.to_datetime(df_export[col]).dt.strftime('%d/%m/%Y')
             
     # Création du dossier de sortie s'il n'existe pas
+    # Création du dossier de sortie s'il n'existe pas
     os.makedirs(output_dir, exist_ok=True)
 
     csv_file = os.path.join(output_dir, f"{output_prefix}.csv")
@@ -393,7 +394,7 @@ def analyze_and_export(df: pd.DataFrame, output_prefix: str = "transactions", so
 
 
 
-def batch_process_pdf_folder(source_dir=config.INPUT_DIR, output_dir=config.output_dir):
+def batch_process_pdf_folder(source_dir=config.input_dir, output_dir=config.output_dir):
     """
     Parcourt tous les fichiers PDF du dossier source et lance l'extraction pour chacun.
     """
@@ -527,20 +528,3 @@ def process_all_pdf_files(output_dir, final_output_name):
     return full_df
 
 
-if __name__ == "__main__":
-    folder = "src_image"  # Dossier contenant vos PDFs splittés (une page par fichier) ou images
-    if os.path.exists(folder):
-        # Option A: Traitement par lot
-        final_excel = batch_process_pdf_folder(folder, "releve_final.xlsx")
-        if final_excel:
-            print(f"Extraction terminée : {final_excel}")
-        
-        # Option B: Test sur une image spécifique
-        test_img = os.path.join(folder, "page_1.png") # ou .pdf
-        if os.path.exists(test_img):
-            df = extract_table_from_image(test_img)
-            if df is not None:
-                print(df.head())
-    else:
-        print(f"Dossier {folder} introuvable.")
-    pass

@@ -12,6 +12,7 @@ create table public.user_profiles (
   telephone text,
   entreprise text,
   credits int default 2,
+  is_admin boolean default false,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 

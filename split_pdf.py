@@ -1,6 +1,7 @@
 import fitz # PyMuPDF
 import subprocess
 import pytesseract
+import platform
 from PIL import Image
 import io
 import os
@@ -8,25 +9,31 @@ import shutil
 import config 
 
 # 🚨 CHEMINS TESSERACT : UTILISEZ CEUX QUE VOUS AVEZ VÉRIFIÉS 🚨
-TESSERACT_PATH = r"C:\Users\HP ELITE BOOK\AppData\Local\Programs\Tesseract-OCR\tesseract.exe" 
-TESSDATA_DIR = r"C:\Users\HP ELITE BOOK\AppData\Local\Programs\Tesseract-OCR\tessdata"
-
-import platform
-
-# Vérifie si on est sur Windows ou Linux
 if platform.system() == "Windows":
-    TESSERACT_PATH = r"C:\Users\HP ELITE BOOK\AppData\Local\Programs\Tesseract-OCR\tesseract.exe"
-    pytesseract.pytesseract.tesseract_cmd = TESSERACT_PATH
-    os.environ['TESSDATA_PREFIX'] = r"C:\Users\HP ELITE BOOK\AppData\Local\Programs\Tesseract-OCR\tessdata"
+    TESSERACT_PATH = r"C:\Users\HP ELITE BOOK\AppData\Local\Programs\Tesseract-OCR\tesseract.exe" 
+    TESSDATA_DIR = r"C:\Users\HP ELITE BOOK\AppData\Local\Programs\Tesseract-OCR\tessdata"
 else:
-    # Sur Streamlit Cloud (Linux), Tesseract est dans le PATH par défaut
-    TESSERACT_PATH = "tesseract" 
-    pytesseract.pytesseract.tesseract_cmd = "tesseract"
-    # Sous Linux, les données sont généralement ici :
-    os.environ['TESSDATA_PREFIX'] = "/usr/share/tesseract-ocr/5/tessdata"
+    # Configuration pour Linux (Docker / Cloud)
+    TESSERACT_PATH = "tesseract"
+    # On tente un chemin standard, mais on laisse vide si non trouvé pour que Tesseract utilise son défaut
+    TESSDATA_DIR = "/usr/share/tesseract-ocr/4.00/tessdata"  # Valeur par défaut Debian
+    if not os.path.exists(TESSDATA_DIR):
+         TESSDATA_DIR = "/usr/share/tesseract-ocr/5/tessdata" # Autre standard
+    
+    # Si toujours pas trouvé, on ne définit pas la variable, on laisse le système gérer
+    if not os.path.exists(TESSDATA_DIR):
+        TESSDATA_DIR = None
 
+# Configuration de l'environnement Python pour Tesseract
+pytesseract.pytesseract.tesseract_cmd = TESSERACT_PATH
 
-def generate_ocr_split(input_pdf_path, output_split_dir=config.INPUT_DIR):
+# Définit la variable d'environnement TESSDATA_PREFIX (plus fiable)
+if "Windows" in platform.system() or TESSDATA_DIR:
+    # Sous Linux, on ne met la variable que si on a trouvé un dossier valide
+    if TESSDATA_DIR:
+        os.environ['TESSDATA_PREFIX'] = TESSDATA_DIR 
+
+def generate_ocr_split(input_pdf_path, output_split_dir=config.input_dir):
     """
     Traite le PDF page par page, effectue l'OCR et sauvegarde chaque page 
     individuellement dans un dossier.
@@ -68,21 +75,19 @@ def generate_ocr_split(input_pdf_path, output_split_dir=config.INPUT_DIR):
             temp_pdf_file = f"temp_ocr_page_{i+1}.pdf"
             split_output_file = os.path.join(output_split_dir, f"ocr_page_{i+1}.pdf")
             
-            # 3. Exécution de Tesseract via l'API Python (Plus robuste sur le Cloud)
-            try:
-                img = Image.open(temp_image_file)
-                # Cette fonction remplace toute la commande subprocess
-                pdf_data = pytesseract.image_to_pdf_or_hocr(img, lang=TESSERACT_LANG, extension='pdf')
-                
-                # On enregistre directement le résultat dans le fichier final
-                with open(split_output_file, 'wb') as f:
-                    f.write(pdf_data)
-            except Exception as e:
-                print(f"Erreur lors de l'OCR page {i+1}: {e}")
-                continue
-
-            # # 4. Déplacement du fichier OCR final vers le dossier de split
-            # shutil.move(temp_pdf_file, split_output_file)
+            # 3. Exécution de Tesseract (génère temp_pdf_file)
+            command = [
+                TESSERACT_PATH,
+                temp_image_file, 
+                temp_pdf_file[:-4], # Fichier de sortie temporaire (nom sans extension .pdf)
+                '-l', TESSERACT_LANG,
+                'pdf' 
+            ]
+            
+            subprocess.run(command, check=True, capture_output=True, text=True)
+            
+            # 4. Déplacement du fichier OCR final vers le dossier de split
+            shutil.move(temp_pdf_file, split_output_file)
             
             # 5. Nettoyage
             os.remove(temp_image_file)

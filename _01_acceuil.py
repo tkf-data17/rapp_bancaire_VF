@@ -261,10 +261,14 @@ if not st.session_state.authenticated:
                         time.sleep(2)
                         
                         # On vide les champs manuellement
-                        keys_to_clear = ["reg_email", "reg_nom", "reg_prenoms", "reg_tel_num", "reg_ent", "reg_pass", "reg_pass_conf", "reg_ind"]
+                        # On vide les champs manuellement en forçant des valeurs vides
+                        keys_to_clear = ["reg_email", "reg_nom", "reg_prenoms", "reg_tel_num", "reg_ent", "reg_pass", "reg_pass_conf"]
                         for key in keys_to_clear:
-                            if key in st.session_state:
-                                del st.session_state[key]
+                             st.session_state[key] = ""
+                        
+                        # Pour le selectbox, on ne peut pas mettre "", on laisse le rerun le remettre à defaut ou on force l'index 0 si besoin
+                        if "reg_ind" in st.session_state:
+                             del st.session_state["reg_ind"]
                         
                         st.rerun()
                     else:
@@ -498,6 +502,13 @@ else:
         st.markdown("<h3>🛡️ Administration</h3>", unsafe_allow_html=True)
         st.markdown("<p>Gestion des utilisateurs et des crédits.</p>", unsafe_allow_html=True)
         
+        if st.button("🔄 Actualiser la liste"):
+            auth_manager.get_all_users.clear()
+            auth_manager._get_admin_client.clear()
+            auth_manager.get_credits.clear()
+            auth_manager.is_admin.clear()
+            st.rerun()
+
         users = auth_manager.get_all_users()
         
         if not users:
@@ -517,25 +528,58 @@ else:
                 
                 col_cred1, col_cred2, col_cred3 = st.columns([1, 1, 1])
                 with col_cred1:
-                     st.metric("Crédits actuels", selected_user.get('credits', 0))
+                     # Check overrides
+                     display_credits = selected_user.get('credits', 0)
+                     if "local_credits" in st.session_state and selected_uid in st.session_state["local_credits"]:
+                         display_credits = st.session_state["local_credits"][selected_uid]
+                     st.metric("Crédits actuels", display_credits)
                 
                 with col_cred2:
-                    credits_to_add = st.number_input("Ajustement (+/-)", value=0, step=1, key=f"cred_adj_{selected_uid}")
+                    ad_key = f"cred_adj_{selected_uid}"
+                    if ad_key not in st.session_state:
+                        st.session_state[ad_key] = 0
+                    credits_to_add = st.number_input("Ajustement (+/-)", step=1, key=ad_key)
                 
                 with col_cred3:
                     st.write("") 
                     st.write("") 
-                    if st.button("Valider l'ajustement", type="primary", key=f"btn_valid_{selected_uid}"):
-                        if credits_to_add != 0:
-                            success, msg = auth_manager.admin_update_credits(selected_uid, credits_to_add)
-                            if success:
-                                st.success(msg)
-                                time.sleep(1)
-                                st.rerun()
+                    def update_credit_callback(uid):
+                        # Récupère la valeur directement depuis le state
+                        val = st.session_state.get(f"cred_adj_{uid}", 0)
+                        if val != 0:
+                            # Note: admin_update_credits renvoie maintenant (success, msg, NEW_TOTAL)
+                            # On ne récupère que les 2 premiers pour compatibilité si l'edit n'est pas vu, 
+                            # mais idéalement on unpack 3 valeurs.
+                            res = auth_manager.admin_update_credits(uid, val)
+                            if len(res) == 3:
+                                success, msg, new_total = res
                             else:
-                                st.error(msg)
+                                success, msg = res
+                                new_total = 0 # Should not happen with new code
+
+                            if success:
+                                st.session_state["admin_msg"] = ("success", msg)
+                                # Le reset fonctionne ici car on est dans le callback (avant le rerun)
+                                st.session_state[f"cred_adj_{uid}"] = 0
+                                
+                                # Mise à jour locale pour affichage instantané
+                                if "local_credits" not in st.session_state: st.session_state["local_credits"] = {}
+                                st.session_state["local_credits"][uid] = new_total
+                            else:
+                                st.session_state["admin_msg"] = ("error", msg)
                         else:
-                            st.warning("Veuillez saisir une valeur différente de 0.")
+                            st.session_state["admin_msg"] = ("warning", "Veuillez saisir une valeur.")
+
+                    
+                    st.button("Valider l'ajustement", type="primary", key=f"btn_valid_{selected_uid}", on_click=update_credit_callback, args=(selected_uid,))
+                    
+                    # Affichage du message après le rerun
+                    if "admin_msg" in st.session_state:
+                         m_type, m_text = st.session_state["admin_msg"]
+                         if m_type == "success": st.success(m_text)
+                         elif m_type == "error": st.error(m_text)
+                         elif m_type == "warning": st.warning(m_text)
+                         del st.session_state["admin_msg"]
 
                 st.markdown("---")
                 
@@ -548,18 +592,27 @@ else:
                          st.error(f"Êtes-vous VRAIMENT sûr de vouloir supprimer {selected_user.get('nom','')} ?")
                          col_del1, col_del2 = st.columns(2)
                          with col_del1:
-                             if st.button("OUI, Supprimer", key=f"btn_del_confirm_{selected_uid}"):
-                                 success, msg = auth_manager.admin_delete_user(selected_uid)
+                             def delete_user_callback(uid):
+                                 success, msg = auth_manager.admin_delete_user(uid)
                                  if success:
-                                     st.success(msg)
-                                     time.sleep(2)
-                                     st.rerun()
+                                     st.session_state["admin_msg"] = ("success", msg)
+                                     # Reset du state de confirmation
+                                     if f"confirm_delete_{uid}" in st.session_state:
+                                         del st.session_state[f"confirm_delete_{uid}"]
+                                     # IMPORTANT: Si l'user supprimé est celui affiché, il faut recharger la liste ou gérer l'erreur de display
+                                     # Le plus simple est de clear le cache users
+                                     auth_manager.get_all_users.clear()
                                  else:
-                                     st.error(msg)
+                                     st.session_state["admin_msg"] = ("error", msg)
+                             
+                             st.button("OUI, Supprimer", key=f"btn_del_confirm_{selected_uid}", type="primary", on_click=delete_user_callback, args=(selected_uid,))
+
                          with col_del2:
-                             if st.button("Annuler", key=f"btn_del_cancel_{selected_uid}"):
-                                 st.session_state[f"confirm_delete_{selected_uid}"] = False
-                                 st.rerun()
+                             def cancel_delete_callback(uid):
+                                 st.session_state[f"confirm_delete_{uid}"] = False
+                                 
+                             st.button("Annuler", key=f"btn_del_cancel_{selected_uid}", on_click=cancel_delete_callback, args=(selected_uid,))
+
 
         st.markdown('</div>', unsafe_allow_html=True)
         st.stop()
@@ -647,14 +700,29 @@ else:
                             if extracted_excel_path and os.path.exists(extracted_excel_path):
                                 df_releve = pd.read_excel(extracted_excel_path, engine='openpyxl')
                                 status_text.success("Extraction PDF terminée avec succès !")
+                                
+                                # OFFRE DE TÉLÉCHARGEMENT DU RELEVÉ EXTRAIT (POUR VÉRIFICATION)
+                                with open(extracted_excel_path, "rb") as f:
+                                    st.download_button(
+                                        label="📥 Télécharger le relevé extrait (pour vérification)",
+                                        data=f,
+                                        file_name=os.path.basename(extracted_excel_path),
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                        key="dl_extracted_releve"
+                                    )
+                                
                                 time.sleep(1) # Petit temps pour lire le message
                                 status_text.empty()
                             else:
-                                st.error("L'extraction du PDF a échoué ou n'a produit aucun résultat.")
+                                st.error("L'extraction du PDF a échoué (Résultat vide). Vérifiez si le PDF est valide.")
                                 st.stop()
                                 
                         except Exception as e:
-                            st.error(f"Erreur lors de l'analyse du PDF : {e}")
+                            st.error(f"Erreur CRITIQUE lors de l'analyse du PDF : {e}")
+                            with st.expander("Voir les détails techniques (pour support)"):
+                                st.code(str(e))
+                                import traceback
+                                st.code(traceback.format_exc())
                             st.stop()
                         finally:
                             # Nettoyage facultatif du PDF uploadé

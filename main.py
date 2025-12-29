@@ -14,7 +14,7 @@ from extract_table import batch_process_pdf_folder, process_all_pdf_files
 # 3. FUSION ET EXPORT : Regroupement de toutes les transactions dans un fichier Excel/CSV final.
 # =================================================================================================
 
-def run_extraction_pipeline(input_pdf_path):
+def run_extraction_pipeline(input_pdf_path, status_callback=None):
     """
     Exécute le pipeline complet d'extraction pour un fichier PDF donné.
     Retourne le chemin du fichier Excel consolidé généré.
@@ -57,7 +57,8 @@ def run_extraction_pipeline(input_pdf_path):
     
     # Appel Tesseract
     # Note: generate_ocr_split retourne le dossier s'il réussit
-    ocr_result_dir = generate_ocr_split(input_pdf_path, ocr_output_dir)
+    if status_callback: status_callback("Initialisation de l'OCR...")
+    ocr_result_dir = generate_ocr_split(input_pdf_path, ocr_output_dir, progress_callback=status_callback)
     
     if not ocr_result_dir:
         print("❌ CRITICAL: OCR result dir is None. Tesseract execution failed.")
@@ -74,6 +75,7 @@ def run_extraction_pipeline(input_pdf_path):
     print("-"*50)
 
     # Extraction vers CSV intermédiaires
+    if status_callback: status_callback("Extraction des tableaux (Parsing)...")
     batch_process_pdf_folder(ocr_result_dir, output_dir=csv_output_dir)
     
     print("✅ Étape 2 terminée. Fichiers intermédiaires générés.")

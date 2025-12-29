@@ -33,7 +33,7 @@ if "Windows" in platform.system() or TESSDATA_DIR:
     if TESSDATA_DIR:
         os.environ['TESSDATA_PREFIX'] = TESSDATA_DIR 
 
-def generate_ocr_split(input_pdf_path, output_split_dir=config.input_dir):
+def generate_ocr_split(input_pdf_path, output_split_dir=config.input_dir, progress_callback=None):
     """
     Traite le PDF page par page, effectue l'OCR et sauvegarde chaque page 
     individuellement dans un dossier.
@@ -42,6 +42,14 @@ def generate_ocr_split(input_pdf_path, output_split_dir=config.input_dir):
     TESSERACT_LANG = "fra" 
     
     try:
+        # Debug Tesseract Path (Logs serveur)
+        if progress_callback: progress_callback("Vérification de Tesseract...")
+        try:
+            ver_check = subprocess.run([TESSERACT_PATH, "--version"], capture_output=True, text=True)
+            print(f"DEBUG: Tesseract Version: {ver_check.stdout}")
+        except Exception as e:
+            print(f"WARNING: Impossible de lancer tesseract --version: {e}")
+
         # Nettoyage et création du dossier de sortie
         if os.path.exists(output_split_dir):
             print(f"Nettoyage du dossier existant : '{output_split_dir}'")
@@ -59,14 +67,21 @@ def generate_ocr_split(input_pdf_path, output_split_dir=config.input_dir):
             print(f"Création du dossier de sortie : '{output_split_dir}'")
             
         doc = fitz.open(input_pdf_path)
-        print(f"Démarrage de l'OCR sur {doc.page_count} pages...")
+        total_pages = doc.page_count
+        print(f"Démarrage de l'OCR sur {total_pages} pages...")
         
-        # Nous n'avons plus besoin de temp_ocr_files car il n'y a pas de fusion
+        if progress_callback: progress_callback(f"PDF chargé : {total_pages} pages à traiter.")
         
-        for i in range(doc.page_count):
+        for i in range(total_pages):
+            # Update Progress
+            msg = f"Traitement OCR : Page {i+1} sur {total_pages}..."
+            print(msg)
+            if progress_callback: progress_callback(msg)
+
             page = doc.load_page(i)
             
             # 1. Conversion de la page en image PNG (haute résolution)
+            # Réduction légère du DPI pour accélérer sur le cloud si nécessaire (200 est souvent suffisant)
             pix = page.get_pixmap(dpi=300) 
             temp_image_file = f"temp_ocr_page_{i+1}.png"
             pix.save(temp_image_file)
@@ -90,7 +105,7 @@ def generate_ocr_split(input_pdf_path, output_split_dir=config.input_dir):
             shutil.move(temp_pdf_file, split_output_file)
             
             # 5. Nettoyage
-            os.remove(temp_image_file)
+            if os.path.exists(temp_image_file): os.remove(temp_image_file)
             
             # print(f"Page {i+1} : OCR terminé et enregistré dans '{split_output_file}'")
 

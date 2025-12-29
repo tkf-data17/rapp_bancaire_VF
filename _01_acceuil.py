@@ -695,24 +695,40 @@ else:
                             with open(temp_pdf_path, "wb") as f:
                                 f.write(file_upload.getbuffer())
                                 
-                            # Lancement du pipeline d'extraction via main.py / run_extraction_pipeline
-                            extracted_excel_path = pdf_extractor.run_extraction_pipeline(temp_pdf_path)                            
-                            if extracted_excel_path and os.path.exists(extracted_excel_path):
-                                df_releve = pd.read_excel(extracted_excel_path, engine='openpyxl')
-                                status_text.success("Extraction PDF terminée avec succès !")
+                        # Lancement du pipeline d'extraction via main.py / run_extraction_pipeline
+                            with st.status("Traitement en cours...", expanded=True) as status:
+                                st.write("Préparation de l'environnement...")
                                 
-                                # OFFRE DE TÉLÉCHARGEMENT DU RELEVÉ EXTRAIT (POUR VÉRIFICATION)
-                                with open(extracted_excel_path, "rb") as f:
-                                    st.download_button(
-                                        label="📥 Télécharger le relevé extrait (pour vérification)",
-                                        data=f,
-                                        file_name=os.path.basename(extracted_excel_path),
-                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                        key="dl_extracted_releve"
-                                    )
+                                # Callback pour mettre à jour le statut
+                                def update_status(msg):
+                                    st.write(msg)
+                                    status.update(label=msg)
+                                    # Hack pour forcer le refresh visuel si nécessaire (Streamlit gère généralement bien)
                                 
-                                time.sleep(1) # Petit temps pour lire le message
-                                status_text.empty()
+                                extracted_excel_path = pdf_extractor.run_extraction_pipeline(temp_pdf_path, status_callback=update_status)                            
+                                
+                                if extracted_excel_path and os.path.exists(extracted_excel_path):
+                                    status.update(label="Extraction terminée !", state="complete", expanded=False)
+                                    
+                                    df_releve = pd.read_excel(extracted_excel_path, engine='openpyxl')
+                                    # status_text.success("Extraction PDF terminée avec succès !") # Remplacé par le status.complete
+                                    
+                                    # OFFRE DE TÉLÉCHARGEMENT DU RELEVÉ EXTRAIT (POUR VÉRIFICATION)
+                                    with open(extracted_excel_path, "rb") as f:
+                                        st.download_button(
+                                            label="📥 Télécharger le relevé extrait (pour vérification)",
+                                            data=f,
+                                            file_name=os.path.basename(extracted_excel_path),
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                            key="dl_extracted_releve"
+                                        )
+                                    
+                                    time.sleep(1) 
+                                    # status_text.empty()
+                                else:
+                                    status.update(label="Échec de l'extraction", state="error")
+                                    st.error("L'extraction du PDF a échoué (Résultat vide). Vérifiez si le PDF est valide.")
+                                    st.stop()
                             else:
                                 st.error("L'extraction du PDF a échoué (Résultat vide). Vérifiez si le PDF est valide.")
                                 st.stop()

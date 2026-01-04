@@ -4,5 +4,5 @@
 
 INPUT_DIR = "documents"
 input_dir = "ocr_split_pages"
-input_pdf = "relevé_hnI.pdf"
+input_pdf = "relevé.pdf"
 output_dir = "extraction_files"

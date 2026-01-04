@@ -12,11 +12,6 @@ import time
 import config
 import importlib
 
-# importlib.reload(style)
-# importlib.reload(auth_manager)
-
-# importlib.reload(style) # Force le rechargement du style à chaque run
-# importlib.reload(auth_manager) # Force le rechargement de l'auth
 
 
 # Configuration de la page
@@ -42,7 +37,7 @@ def reset_callback():
 def logout():
     st.session_state.authenticated = False
     st.session_state.user_email = ""
-    # st.rerun()
+
 
 # Gestion du logout via URL (pour le bouton dans le header)
 if "logout" in st.query_params:
@@ -684,7 +679,7 @@ else:
                     
                     if ext_releve == 'pdf':
                         status_text = st.empty()
-                        status_text.info("Etat de Rapprochement en cours de traitement... (Cela peut prendre plus d'une minute)")
+                        status_text.info("Etat de Rapprochement en cours de traitement... (Veuillez patienter quelques secondes)")
                         
                         # Création d'un fichier temporaire pour le PDF
                         try:
@@ -697,15 +692,17 @@ else:
                                 
                         # Lancement du pipeline d'extraction via main.py / run_extraction_pipeline
                             with st.status("Traitement en cours...", expanded=True) as status:
-                                st.write("Préparation de l'environnement...")
+                                # st.write("Préparation de l'environnement...")
                                 
                                 # Callback pour mettre à jour le statut
                                 def update_status(msg):
-                                    st.write(msg)
-                                    status.update(label=msg)
+                                    # st.write(msg)
+                                    # On ne met à jour le titre que pour les grandes étapes, pas pour chaque page OCR
+                                    if not msg.startswith("OCR page") and not msg.startswith("Traitement OCR"):
+                                        status.update(label=msg)
                                     # Hack pour forcer le refresh visuel si nécessaire (Streamlit gère généralement bien)
                                 
-                                extracted_excel_path = pdf_extractor.run_extraction_pipeline(temp_pdf_path, status_callback=update_status)                            
+                                extracted_excel_path = pdf_extractor.run_extraction_pipeline(temp_pdf_path, bank_name=choix_banque, status_callback=update_status)                            
                                 
                                 if extracted_excel_path and os.path.exists(extracted_excel_path):
                                     status.update(label="Extraction terminée !", state="complete", expanded=False)
@@ -729,7 +726,13 @@ else:
                                     status.update(label="Échec de l'extraction", state="error")
                                     st.error("L'extraction du PDF a échoué (Résultat vide). Vérifiez si le PDF est valide.")
                                     st.stop()
-
+                        
+                        except ValueError as ve:
+                             status_text.empty()
+                             status.update(label="Opération annulée", state="error", expanded=False)
+                             # Affiche le message "cette banque n'est pas actif..." proprement
+                             st.error(str(ve))
+                             st.stop()
                                 
                         except Exception as e:
                             st.error(f"Erreur CRITIQUE lors de l'analyse du PDF : {e}")
@@ -792,6 +795,12 @@ else:
                         'date_gen': date_display 
                     })
 
+
+                    # NETTOYAGE DES FICHIERS TEMPORAIRES ET SOURCE
+                    # Uniquement si un PDF a été traité (temp_pdf_path défini)
+                    if 'temp_pdf_path' in locals() and temp_pdf_path:
+                        # On appelle la fonction de nettoyage du module main (alias pdf_extractor)
+                        pdf_extractor.cleanup_extraction_artifacts(temp_pdf_path)
 
                     end_time = time.time()
                     duration = end_time - start_time

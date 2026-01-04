@@ -70,6 +70,30 @@ def executer_rapprochement(data_banque, data_compta, data_etat_prec=None, date_r
     df_banque[cols_montants] = df_banque[cols_montants].fillna(0)
     df_compta[cols_montants] = df_compta[cols_montants].fillna(0)
 
+    # --- NETTOYAGE JOURNAL : SUPPRESSION DES ANNULATIONS (e.g. 1500 et -1500) ---
+    def get_indices_annulation(df, col):
+        indices = []
+        pos_map = {}
+        # On mappe les positifs
+        for idx, val in df[col][df[col] > 0].items():
+            v = round(val, 4)
+            pos_map.setdefault(v, []).append(idx)
+        # On cherche les correspondances avec les négatifs
+        for idx, val in df[col][df[col] < 0].items():
+            target = round(abs(val), 4)
+            if target in pos_map and pos_map[target]:
+                indices.append(idx)
+                indices.append(pos_map[target].pop(0))
+        return indices
+
+    drop_d = get_indices_annulation(df_compta, 'debit')
+    drop_c = get_indices_annulation(df_compta, 'credit')
+    indices_a_supprimer = list(set(drop_d + drop_c))
+    
+    if indices_a_supprimer:
+        # print(f"Suppression de {len(indices_a_supprimer)} lignes d'annulations dans le journal.")
+        df_compta = df_compta.drop(indices_a_supprimer)
+
     # Listes pour stocker les lignes rapprochées
     indices_banque_ok = []
     indices_compta_ok = []

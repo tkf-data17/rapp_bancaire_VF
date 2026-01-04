@@ -145,7 +145,8 @@ def extract_transactions_from_pdf(pdf_path: str) -> pd.DataFrame:
                 "Solde précédent", # Ligne de solde initial
                 "Page", "Edité le", "www.orabank.net", "ORABANK", "Capital de", "RCCM", # Pied de page
                 "Veuillez noter que vous disposez", "Place de l'indépendance", "Tél. :", # Mentions légales
-                "Total général", "Total des mouvements" # Totaux
+                "Total général", "Total des mouvements", # Totaux
+                "RELEVE D'IDENTITE BANCAIRE", "EXTRAIT DE COMPTE" # En-têtes parasites
             ]
             
             should_skip = False
@@ -209,14 +210,37 @@ def extract_transactions_from_pdf(pdf_path: str) -> pd.DataFrame:
                     
                 elif x < COLUMN_BOUNDS["libelle_limit"]:
                     current_tx["Libellé"] += text + " "
+                
                 elif x < COLUMN_BOUNDS["valeur_limit"]:
+                    # Date Valeur - keep as is, usually dates
                     current_tx["Date Valeur"] += text
-                elif x < COLUMN_BOUNDS["debit_limit"]:
-                    current_tx["Débit"] += text 
-                elif x < COLUMN_BOUNDS["credit_limit"]:
-                    current_tx["Crédit"] += text
-                else: # Solde
-                    current_tx["Solde"] += text
+                    
+                else:
+                    # Débit (350-430), Crédit (430-515), Solde (>515)
+                    # Heuristic: If the word contains letters or slashes (dates), it's likely a Libellé spillover.
+                    # Also check length: A single word representing an amount part shouldn't be excessively long (e.g. RIB/ID).
+                    # Valid amounts in this PDF are space-separated (e.g. "3 298 028"), so words are length 1-3.
+                    # We allow up to 6 to support "100000" but reject "0110124" (7 digits) or RIB (11+).
+                    
+                    cleaned_digits = re.sub(r'[^\d]', '', text)
+                    is_amount_like = (
+                        not re.search(r'[a-zA-Z/]', text) and 
+                        len(cleaned_digits) < 10
+                    )
+                    
+                    target_col = ""
+                    if x < COLUMN_BOUNDS["debit_limit"]:
+                        target_col = "Débit"
+                    elif x < COLUMN_BOUNDS["credit_limit"]:
+                        target_col = "Crédit"
+                    else:
+                        target_col = "Solde"
+                    
+                    if is_amount_like:
+                        current_tx[target_col] += text
+                    else:
+                        # It's spillover text, put it back in Libellé
+                        current_tx["Libellé"] += text + " "
             
             # Si c'était la ligne de total (cas mixte), on ferme la transaction maintenant
             if matches_total_footer:
@@ -332,6 +356,160 @@ def clean_and_format_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         
     return df
 
+def check_and_correct_balances(df: pd.DataFrame, start_solde: float) -> pd.DataFrame:
+    """
+    Vérifie la cohérence des soldes (Solde Prec +/- Mvt = Solde Fin)
+    et tente de corriger automatiquement les erreurs d'OCR (ex: 29 au lieu de 2).
+    """
+    if df.empty or 'solde' not in df.columns:
+        return df
+
+    # Le solde calculé précédent (n-1) commence au solde initial
+    solde_precedent_calcule = start_solde
+    corrected_count = 0
+    
+    print(f"\n🔧 Vérification et correction des soldes (Départ: {start_solde:,.0f})")
+
+    def is_plausible(original_val: float, suggested_val: float) -> bool:
+        """
+        Vérifie si la valeur suggérée est une 'correction crédible' de la valeur originale
+        (ex: erreur OCR, chiffre en trop, faute de frappe).
+        Ne valide PAS une valeur totalement différente.
+        """
+        s_orig = str(int(original_val))
+        s_sugg = str(int(suggested_val))
+        
+        # 0. Import (local d'urgence ou en haut du fichier idéalement)
+        import difflib
+
+        # 1. Identité (pas de changement)
+        if s_orig == s_sugg: return True
+        
+        # 2. Spillover / Préfixe en trop (ex: "29979725" -> "2979725")
+        # ou Suffixe en trop (ex: "32980282224" -> "329802822")
+        # Si le suggéré est contenu dans l'original
+        if (s_orig.endswith(s_sugg) or s_orig.startswith(s_sugg)) and len(s_orig) > len(s_sugg):
+            return True
+        
+        # 3. Fuzzy match (Insertion d'un chiffre parasite au milieu ex: 29979 vs 2979)
+        # Ratio de similitude > 0.85
+        ratio = difflib.SequenceMatcher(None, s_orig, s_sugg).ratio()
+        if ratio > 0.85:
+            return True
+            
+        # 4. Un chiffre en trop (Noise) n'importe où
+        # Si en retirant 1 char de s_orig on tombe sur s_sugg
+        if len(s_orig) == len(s_sugg) + 1:
+            for k in range(len(s_orig)):
+                temp = s_orig[:k] + s_orig[k+1:]
+                if temp == s_sugg:
+                    return True
+        
+        return False
+
+    for i, row in df.iterrows():
+        # 1. Récupération des données lues
+        solde_lu_n = row.get('solde', 0.0)
+        debit_lu_n = row.get('debit', 0.0)
+        credit_lu_n = row.get('credit', 0.0)
+        
+        # 0. Pré-vérification du Solde Lu
+        # Si le Solde Lu est corrompu (ex: "3298...24" au lieu de "3298..."), on le corrige d'abord
+        # en se basant sur le Solde Précédent + Mouvements Lus (si ceux-ci semblent corrects/petits par rapport à la corruption)
+        solde_theo_transactions = solde_precedent_calcule + credit_lu_n - debit_lu_n
+        
+        if abs(solde_lu_n - solde_theo_transactions) > 1.0:
+             # Si le solde théorique (calculé) est une version "propre" du solde lu
+             if is_plausible(solde_lu_n, solde_theo_transactions):
+                 print(f"  ✅ Correction Solde Ligne {i+1}: {solde_lu_n:,.0f} -> {solde_theo_transactions:,.0f}")
+                 df.at[i, 'solde'] = solde_theo_transactions
+                 solde_lu_n = solde_theo_transactions # Mise à jour locale pour la suite
+        
+        # 2. Calcul du mouvement théorique (Net)
+        # Net = Solde(n) - Solde(n-1)
+        # Si positif => Crédit. Si négatif => Débit.
+        mouvement_net_theorique = solde_lu_n - solde_precedent_calcule
+        
+        applied_correction = False
+        
+        # Cas A: On s'attend à un CRÉDIT (Solde augmente)
+        if mouvement_net_theorique > 0:
+            theorique_credit = mouvement_net_theorique
+            
+            # Si on a extrait un débit par erreur, ou un crédit faux
+            if abs(credit_lu_n - theorique_credit) > 1.0:
+                 libelle_val = str(row.get('libelle', '')).strip()
+                 first_word = libelle_val.split(' ')[0] if ' ' in libelle_val else libelle_val
+                 
+                 # Scénario 0: Le montant est dans le Libellé (spillover gauche)
+                 # Ex: Libellé = "2812950 ESPECE..." et Credit = 0
+                 if credit_lu_n == 0 and clean_amount(first_word) == theorique_credit:
+                     print(f"  ✅ Correction Spillover Ligne {i+1} (Libellé->Crédit): {first_word} -> {theorique_credit:,.0f}")
+                     df.at[i, 'credit'] = theorique_credit
+                     # Nettoyer le libellé
+                     new_lib = libelle_val[len(first_word):].strip()
+                     df.at[i, 'libelle'] = new_lib
+                     applied_correction = True
+                 
+                 # Scénario 1 : Le montant est dans Crédit mais mal lu (ex: 29M vs 2M)
+                 elif credit_lu_n > 0 and is_plausible(credit_lu_n, theorique_credit):
+                     print(f"  ✅ Correction Plausible Ligne {i+1} (Crédit): {credit_lu_n:,.0f} -> {theorique_credit:,.0f}")
+                     df.at[i, 'credit'] = theorique_credit
+                     df.at[i, 'debit'] = 0.0
+                     applied_correction = True
+                 
+                 # Scénario 2 : Le montant a été mis dans Débit par erreur ? (Peu probable ici mais possible)
+                 elif debit_lu_n > 0 and is_plausible(debit_lu_n, theorique_credit):
+                     print(f"  ✅ Correction Colonne Ligne {i+1} (Débit->Crédit): {debit_lu_n:,.0f} -> {theorique_credit:,.0f}")
+                     df.at[i, 'credit'] = theorique_credit
+                     df.at[i, 'debit'] = 0.0
+                     applied_correction = True
+        
+        # Cas B: On s'attend à un DÉBIT (Solde diminue)     
+        elif mouvement_net_theorique < 0:
+            theorique_debit = abs(mouvement_net_theorique)
+            
+            if abs(debit_lu_n - theorique_debit) > 1.0:
+                 libelle_val = str(row.get('libelle', '')).strip()
+                 first_word = libelle_val.split(' ')[0] if ' ' in libelle_val else libelle_val
+                 
+                 # Scénario 0: Spillover Libellé
+                 if debit_lu_n == 0 and clean_amount(first_word) == theorique_debit:
+                     print(f"  ✅ Correction Spillover Ligne {i+1} (Libellé->Débit): {first_word} -> {theorique_debit:,.0f}")
+                     df.at[i, 'debit'] = theorique_debit
+                     # Nettoyer libellé
+                     new_lib = libelle_val[len(first_word):].strip()
+                     df.at[i, 'libelle'] = new_lib
+                     applied_correction = True
+
+                 elif debit_lu_n > 0 and is_plausible(debit_lu_n, theorique_debit):
+                     print(f"  ✅ Correction Plausible Ligne {i+1} (Débit): {debit_lu_n:,.0f} -> {theorique_debit:,.0f}")
+                     df.at[i, 'debit'] = theorique_debit
+                     df.at[i, 'credit'] = 0.0
+                     applied_correction = True
+                      
+                 elif credit_lu_n > 0 and is_plausible(credit_lu_n, theorique_debit):
+                     print(f"  ✅ Correction Colonne Ligne {i+1} (Crédit->Débit): {credit_lu_n:,.0f} -> {theorique_debit:,.0f}")
+                     df.at[i, 'debit'] = theorique_debit
+                     df.at[i, 'credit'] = 0.0
+                     applied_correction = True
+        
+        if applied_correction:
+            corrected_count += 1
+            
+        # 6. Mise à jour pour la boucle suivante
+        # IMPORTANT : On prend le solde LU comme référence, SAUF si le user veut qu'on recalcule tout.
+        # Mais pour de la correction OCR, faire confiance au Solde écrit (souvent OCRisé plus proprement ou check digits) est mieux.
+        # Toutefois, si le Solde lui-même est faux, tout s'écroule.
+        solde_precedent_calcule = solde_lu_n 
+    
+    if corrected_count > 0:
+        print(f"✨ {corrected_count} corrections plausibles appliquées.")
+    else:
+        print("✅ Aucune correction nécessaire.")
+        
+    return df
+
 def analyze_and_export(df: pd.DataFrame, output_prefix: str = "transactions", solde_precedent: float = 0.0, output_dir: str = config.output_dir):
     print("\n" + "="*70); print("📊 ANALYSE DES TRANSACTIONS"); print("="*70)
     
@@ -438,6 +616,9 @@ def batch_process_pdf_folder(source_dir=config.input_dir, output_dir=config.outp
                 print(f"   ✅ {len(df)} transactions.")
                 df_clean = clean_and_format_dataframe(df)
                 
+                # Correction d'erreurs OCR via le solde
+                df_clean = check_and_correct_balances(df_clean, solde_prec)
+                
                 # Nom du fichier de sortie basé sur le PDF
                 output_name = os.path.splitext(filename)[0]
                 analyze_and_export(df_clean, output_name, solde_prec, output_dir=output_dir)
@@ -453,10 +634,11 @@ def batch_process_pdf_folder(source_dir=config.input_dir, output_dir=config.outp
 #-------------------------------------------------------------------------------------------------
 # Fonction pour parcourir le dossier de sauvegarde et recréér le dataframe complet
 #-------------------------------------------------------------------------------------------------
-def process_all_pdf_files(output_dir, final_output_name):
+def process_all_pdf_files(output_dir, final_output_name, start_solde=None):
     """
     Parcourt le dossier extraction_files, lit les CSV et les combine dans l'ordre.
     Ignore le fichier global s'il existe déjà pour éviter la récursion lors de multiples exécutions.
+    Applique la validation/correction des soldes si start_solde est fourni.
     """
     if not os.path.exists(output_dir):
         print(f"❌ Le dossier {output_dir} n'existe pas.")
@@ -499,6 +681,15 @@ def process_all_pdf_files(output_dir, final_output_name):
 
     # Concaténation
     full_df = pd.concat(all_dfs, ignore_index=True)
+    
+    # -----------------------------------------------------------
+    # Correction et Auto-Guérison des Soldes / Montants
+    # -----------------------------------------------------------
+    if start_solde is not None:
+        try:
+            full_df = check_and_correct_balances(full_df, start_solde)
+        except Exception as e:
+            print(f"⚠️ Erreur lors de la correction des soldes : {e}")
     
     # Ajout de la colonne N° d'ordre en première position
     full_df.insert(0, "N° d'ordre", range(1, len(full_df) + 1))

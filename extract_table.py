@@ -1,5 +1,5 @@
 """
-Script d'extraction de transactions bancaires à partir d'un PDF.
+Script d'extraction des transactions bancaires sur le relevé Orabank à partir d'un PDF.
 Utilise PyMuPDF (fitz) et l'analyse de layout (coordonnées) pour une extraction précise.
 """
 
@@ -108,25 +108,20 @@ def extract_transactions_from_pdf(pdf_path: str) -> pd.DataFrame:
                         "totaldesmouvements" in clean_snippet or 
                         "totaldeb" in clean_snippet or
                         "totalcred" in clean_snippet):
-                         # with open("debug_total.log", "a", encoding="utf-8") as f:
-                         #     f.write("  -> TRUNCATED (snippet match)\n")
                          trunc_index = i
                          matches_total_footer = True
                          break
                     
                     # Check direct variations in the word itself or next word
                     if "totalgénéral" in w[4].replace(" ", "").lower():
-                         # with open("debug_total.log", "a", encoding="utf-8") as f:
-                         #     f.write("  -> TRUNCATED (single word)\n")
+
                          trunc_index = i
                          matches_total_footer = True
                          break
             
             if trunc_index != -1:
                 line_words = line_words[:trunc_index]
-                # with open("debug_total.log", "a", encoding="utf-8") as f:
-                #     remaining = [wx[4] for wx in line_words]
-                #     f.write(f"  -> REMAINING: {remaining}\n")
+
                 
                 # Si c'était un footer "Total", on doit clôre la transaction courante
                 # car les lignes suivantes risquent d'être les montants de ce total

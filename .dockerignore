@@ -1,0 +1,17 @@
+# Exclure les dossiers virtuels et caches
+.venv
+__pycache__
+.git
+.gitignore
+
+# Exclure les fichiers temporaires locaux
+temp_proc
+temp_uploads
+
+# Exclure les secrets locaux (à gérer via variables d'environnement ou montage volume pour la prod)
+.streamlit/secrets.toml
+.env
+
+# Exclure les fichiers système Docker
+Dockerfile
+.dockerignore

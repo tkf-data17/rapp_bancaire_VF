@@ -1,0 +1,32 @@
+# --- Environment Variables & Secrets ---
+# CRITIQUE : Ne jamais envoyer ces fichiers qui contiennent vos mots de passe/clés API
+.env
+.streamlit/secrets.toml
+
+supabase/.temp/
+# --- Virtual Environments ---
+.venv/
+venv/
+env/
+
+# --- Temporary Runtime Directories (Générés par le script) ---
+extraction_files/
+ocr_split_pages/
+temp_proc/
+temp_uploads/
+__pycache__/
+*.pyc
+
+# --- User Data & Documents ---
+# Eviter d'envoyer les relevés bancaires personnels ou les exports
+documents/
+*.pdf
+*.xlsx
+*.xls
+*.csv
+
+# --- Exceptions ---
+# On veut quand même garder les fichiers modèles dans maquette
+!maquette/
+!maquette/*.xlsx
+!maquette/*.pdf

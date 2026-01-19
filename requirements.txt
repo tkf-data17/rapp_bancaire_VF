@@ -1,0 +1,14 @@
+streamlit
+pandas
+openpyxl
+Pillow
+numpy<2.0.0
+xlrd
+fpdf
+
+
+# pour l'extraction du fichier pdf
+python-dotenv
+PyMuPDF
+pytesseract
+supabase

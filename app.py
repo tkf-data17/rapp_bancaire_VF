@@ -136,9 +136,6 @@ st.markdown(style.css_code, unsafe_allow_html=True)
 # ==============================================================================
 # PAGE D'AUTHENTIFICATION (Si non connecté)
 # ==============================================================================
-# ==============================================================================
-# PAGE D'AUTHENTIFICATION (Si non connecté)
-# ==============================================================================
 
 # Cas Spécial : Si on est en mode Reset Password (connecté via lien magique)
 if st.session_state.get('password_reset_mode', False):
@@ -255,7 +252,6 @@ if not st.session_state.authenticated:
                         st.success(msg)
                         time.sleep(2)
                         
-                        # On vide les champs manuellement
                         # On vide les champs manuellement en forçant des valeurs vides
                         keys_to_clear = ["reg_email", "reg_nom", "reg_prenoms", "reg_tel_num", "reg_ent", "reg_pass", "reg_pass_conf"]
                         for key in keys_to_clear:
@@ -304,8 +300,6 @@ else:
     # (La fonction get_img_as_base64 est maintenant définie globalement)
     
     # En-tête (Barre avec logo)
-
-    # En-tête (Barre avec logo)
     st.markdown(f"""
         <div class="fixed-title">
             {img_tag}
@@ -313,7 +307,6 @@ else:
         </div>
     """, unsafe_allow_html=True)
     
-    # --- VIEW: MES RAPPROCHEMENTS ---
     # --- VIEW: MES RAPPROCHEMENTS ---
     if nav == "Mes rapprochements":
         # Remonter le contenu avec une marge négative pour compenser le padding global

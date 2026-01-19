@@ -80,7 +80,7 @@ Le projet repose sur une stack moderne et robuste :
 Pour démarrer l'application en local :
 
 ```bash
-streamlit run _01_acceuil.py
+streamlit run app.py
 ```
 
 L'application sera accessible par défaut sur `http://localhost:8501`.
@@ -100,7 +100,7 @@ L'application sera accessible par défaut sur `http://localhost:8501`.
 
 ## 📂 Structure du Projet
 
-*   `_01_acceuil.py` : Point d'entrée de l'application (Interface Utilisateur).
+*   `app.py` : Point d'entrée de l'application (Interface Utilisateur).
 *   `_02_rapp.py` : Moteur de calcul du rapprochement bancaire.
 *   `_03_auth_manager.py` : Gestion de l'authentification et des interactions base de données.
 *   `_04_pdf_utils.py` : Utilitaires pour la génération des rapports PDF.

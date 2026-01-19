@@ -33,7 +33,7 @@ ENV PORT=7860
 USER user
 
 # 6. Commande de lancement (L'adresse 0.0.0.0 est cruciale)
-CMD ["sh", "-c", "streamlit run _01_acceuil.py --server.port ${PORT} --server.address 0.0.0.0"]
+CMD ["sh", "-c", "streamlit run app.py --server.port ${PORT} --server.address 0.0.0.0"]
 
 
 # FROM python:3.10-slim-bullseye
@@ -62,4 +62,4 @@ CMD ["sh", "-c", "streamlit run _01_acceuil.py --server.port ${PORT} --server.ad
 # ENV PORT=8000
 
 # # Utilisation du chemin complet vers Python pour garantir l'exécution
-# CMD ["sh", "-c", "/usr/local/bin/python -m streamlit run _01_acceuil.py --server.port ${PORT} --server.address 0.0.0.0"]
+# CMD ["sh", "-c", "/usr/local/bin/python -m streamlit run app.py --server.port ${PORT} --server.address 0.0.0.0"]

@@ -2,13 +2,13 @@
 
 ## 📋 Description
 
-**RAPP 30** est une application web professionnelle développée en Python (Streamlit) conçue pour simplifier et automatiser l'état de rapprochement bancaire. L'outil permet aux experts-comptables et responsables financiers de valider la concordance entre leur journal de banque et le relevé bancaire PDF en quelques secondes.
+**RAPP 30** est une application web professionnelle développée en Python (Streamlit) conçue pour simplifier et automatiser l'état de rapprochement bancaire. L'outil permet aux experts-comptables et responsables financiers de valider la concordance entre leur journal de banque et le relevé bancaire PDF (natif) en quelques secondes.
 
-L'application gère l'extraction intelligente de données depuis des documents PDF, propose une interface utilisateur intuitive et fournit des rapports de rapprochement clés en main (Excel et PDF).
+L'application gère l'extraction intelligente de données depuis des documents PDF natifs, propose une interface utilisateur intuitive et fournit des rapports de rapprochement clés en main (Excel et PDF).
 
 ## ✨ Fonctionnalités Clés
 
-*   **Extraction PDF Intelligente** : Conversion automatique des relevés bancaires PDF en données structurées exploitables, y compris la gestion des documents scannés via OCR (Tesseract).
+*   **Extraction PDF Intelligente** : Extraction précise des données depuis des relevés bancaires PDF natifs via analyse de layout.
 *   **Rapprochement Automatisé** : Algorithme puissant comparant les écritures comptables et bancaires pour identifier automatiquement les correspondances (montants, dates).
 *   **Gestion des Suspens** :
     *   Prise en compte de l'état de rapprochement du mois précédent.
@@ -31,8 +31,7 @@ Le projet repose sur une stack moderne et robuste :
     *   `pandas` et `numpy` pour la manipulation et l'analyse des flux financiers.
     *   `openpyxl` et `xlrd` pour la lecture et l'écriture de fichiers Excel.
 *   **Traitement de Documents** :
-    *   `PyMuPDF` (fitz) et `pdfplumber` pour l'extraction de texte.
-    *   `pytesseract` pour l'OCR des documents non natifs.
+    *   `PyMuPDF` (fitz) pour le découpage et l'extraction de texte haute fidélité.
 *   **Base de Données & Auth** : [Supabase](https://supabase.com/) (PostgreSQL) pour la gestion des utilisateurs, l'authentification et le stockage des fichiers (Buckets).
 
 ## 🚀 Installation et Configuration
@@ -40,7 +39,6 @@ Le projet repose sur une stack moderne et robuste :
 ### Prérequis
 
 *   Python 3.9+
-*   [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) installé et accessible dans le PATH système.
 *   Un compte Supabase avec un projet configuré (Authentification + Storage).
 
 ### Installation
@@ -90,7 +88,7 @@ L'application sera accessible par défaut sur `http://localhost:8501`.
 1.  **Inscription/Connexion** : Créez un compte ou connectez-vous pour accéder à l'interface.
 2.  **Accueil** :
     *   Sélectionnez l'établissement bancaire et la date de rapprochement.
-    *   **Import 1** : Chargez votre relevé bancaire (PDF).
+    *   **Import 1** : Chargez votre relevé bancaire (PDF natif).
     *   **Import 2** : (Optionnel) Chargez l'état de rapprochement du mois précédent (Excel).
     *   **Import 3** : Chargez votre journal de banque (Excel).
 3.  **Traitement** : Cliquez sur "Valider". L'outil extrait les données, effectue le pointage et calcule les soldes rectifiés.
@@ -107,7 +105,7 @@ L'application sera accessible par défaut sur `http://localhost:8501`.
 *   `_05_style.py` : Définitions CSS pour le styling de l'interface.
 *   `main.py` : Pipeline d'extraction des données PDF (Orchestrateur).
 *   `extract_table.py` : Scripts d'analyse et d'extraction tabulaire.
-*   `split_pdf.py` : Module de découpage et de préparation OCR des PDF.
+*   `split_pdf.py` : Module de découpage des PDF.
 *   `config.py` : Fichier de configuration globale.
 *   `maquette/` : Dossier contenant les modèles de fichiers pour les utilisateurs.
 
@@ -116,4 +114,4 @@ L'application sera accessible par défaut sur `http://localhost:8501`.
 Projet développé par **[TAYI Koku Fiam/ DSI 2025]**.
 
 ---
-*Dernière mise à jour : Décembre 2025*
+*Dernière mise à jour : Février 2026*

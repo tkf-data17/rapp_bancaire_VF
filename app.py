@@ -9,8 +9,7 @@ import main as pdf_extractor # Pipeline d extraction
 import pandas as pd
 import datetime
 import time
-import config
-import importlib
+
 
 
 
@@ -69,9 +68,7 @@ recovery_access_token = query_params.get("access_token", None)
 recovery_refresh_token = query_params.get("refresh_token", None)
 recovery_type = query_params.get("type", None)
 
-# Debug temporaire pour comprendre ce qui arrive
-# if query_params.get("auth_redirect"):
-#     st.write("Debug Auth Params:", query_params)
+
 
 if (recovery_type == "recovery" or "access_token" in query_params) and recovery_access_token:
     # On a les tokens dans l'URL (suite au rechargement JS), on tente la connexion
@@ -689,11 +686,8 @@ else:
                                 
                                 # Callback pour mettre à jour le statut
                                 def update_status(msg):
-                                    # st.write(msg)
-                                    # On ne met à jour le titre que pour les grandes étapes, pas pour chaque page OCR
                                     if not msg.startswith("OCR page") and not msg.startswith("Traitement OCR"):
                                         status.update(label=msg)
-                                    # Hack pour forcer le refresh visuel si nécessaire (Streamlit gère généralement bien)
                                 
                                 extracted_excel_path = pdf_extractor.run_extraction_pipeline(temp_pdf_path, bank_name=choix_banque, status_callback=update_status)                            
                                 
@@ -701,25 +695,18 @@ else:
                                     status.update(label="Extraction terminée !", state="complete", expanded=False)
                                     
                                     df_releve = pd.read_excel(extracted_excel_path, engine='openpyxl')
-                                    # status_text.success("Extraction PDF terminée avec succès !") # Remplacé par le status.complete
                                     
-                                    # OFFRE DE TÉLÉCHARGEMENT DU RELEVÉ EXTRAIT (POUR VÉRIFICATION)
+                                    # Chargement des données pour le bouton de téléchargement (hors du bloc status pour visibilité)
                                     with open(extracted_excel_path, "rb") as f:
-                                        st.download_button(
-                                            label="📥 Télécharger le relevé extrait (pour vérification)",
-                                            data=f,
-                                            file_name=os.path.basename(extracted_excel_path),
-                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                            key="dl_extracted_releve"
-                                        )
+                                        excel_data = f.read()
+                                    excel_name = os.path.basename(extracted_excel_path)
                                     
                                     time.sleep(1) 
-                                    # status_text.empty()
                                 else:
                                     status.update(label="Échec de l'extraction", state="error")
                                     st.error("L'extraction du PDF a échoué (Résultat vide). Vérifiez si le PDF est valide.")
                                     st.stop()
-                        
+                                               
                         except ValueError as ve:
                              status_text.empty()
                              status.update(label="Opération annulée", state="error", expanded=False)

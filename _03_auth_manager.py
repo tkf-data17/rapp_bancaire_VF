@@ -1,6 +1,6 @@
 import streamlit as st
 from supabase import create_client, Client
-import datetime
+
 
 # --- 1. INITIALISATION AVEC CACHE ---
 import os
@@ -300,7 +300,6 @@ def admin_update_credits(target_user_id, amount):
         
         new_total = max(0, current + amount)
         
-        # Ecrire
         # Ecrire
         client.table("user_profiles").update({"credits": new_total}).eq("id", target_user_id).execute()
         

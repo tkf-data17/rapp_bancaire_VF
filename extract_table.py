@@ -6,14 +6,13 @@ Utilise PyMuPDF (fitz) et l'analyse de layout (coordonnées) pour une extraction
 import pandas as pd
 import re
 import os
-import sys
 import shutil
+import difflib
 import config
-from typing import Optional, List, Dict, Any
-from dotenv import load_dotenv
+
 
 try:
-    import fitz  # PyMuPDF
+    import fitz  
 except ImportError:
     fitz = None
 
@@ -28,7 +27,7 @@ except ImportError:
 
 COLUMN_BOUNDS = {
     "date_limit": 90,
-    "libelle_limit": 260, # Reduced from 280 to capture Date Value starting around 280 more reliably
+    "libelle_limit": 260, 
     "valeur_limit": 350,
     "debit_limit": 430,
     "credit_limit": 515
@@ -97,8 +96,7 @@ def extract_transactions_from_pdf(pdf_path: str) -> pd.DataFrame:
                     # Vérifier le contexte
                     snippet = "".join([wx[4] for wx in line_words[i:i+8]]).replace(" ", "").lower()
                     
-                    # with open("debug_total.log", "a", encoding="utf-8") as f:
-                    #     f.write(f"Word: {w[4]}, Snippet: {snippet}\n")
+
 
                     # Normalisation stricte pour détection
                     clean_snippet = snippet.replace("é", "e").replace("è", "e")
@@ -195,18 +193,12 @@ def extract_transactions_from_pdf(pdf_path: str) -> pd.DataFrame:
             for w in line_words:
                 x, text = w[0], w[4]
                 
-                # Special handling: "Date" in Date column is already handled by new tx check,
-                # but we need to capture the text.
-                # However, ensure we don't capture Libelle content that overflows left (rare)
-                
+
                 if x < COLUMN_BOUNDS["date_limit"]:
-                    # Avoid appending duplicate date if we just created it? 
-                    # Actually valid date is only one word.
-                    # Use = instead of += for Date to avoid "06/10/202506/10/2025" if line repeats? 
-                    # Usually Date is single word.
+
                     if not current_tx["Date"]:
                          current_tx["Date"] = text
-                    # Else ignore? Or could be a multiline date (unlikely)
+
                     
                 elif x < COLUMN_BOUNDS["libelle_limit"]:
                     current_tx["Libellé"] += text + " "
@@ -379,8 +371,7 @@ def check_and_correct_balances(df: pd.DataFrame, start_solde: float) -> pd.DataF
         s_orig = str(int(original_val))
         s_sugg = str(int(suggested_val))
         
-        # 0. Import (local d'urgence ou en haut du fichier idéalement)
-        import difflib
+
 
         # 1. Identité (pas de changement)
         if s_orig == s_sugg: return True
@@ -554,16 +545,7 @@ def analyze_and_export(df: pd.DataFrame, output_prefix: str = "transactions", so
     df_export.to_csv(csv_file, index=False, encoding='utf-8-sig', sep=';') # Point-virgule pour Excel FR
     print(f"\n✅ Exporté vers: {csv_file}")
     
-    # try:
-    #     excel_file = os.path.join(output_dir, f"{output_prefix}.xlsx")
-    #     try:
-    #         df_export.to_excel(excel_file, index=False)
-    #         print(f"✅ Exporté vers: {excel_file}")
-    #     except PermissionError:
-    #         print(f"⚠️ Impossible d'écrire dans {excel_file}. Le fichier est-il ouvert dans Excel ?")
-            
-    # except ImportError:
-    #     print("\n💡 Pour exporter vers Excel, installez openpyxl: pip install openpyxl")
+
 
 
 

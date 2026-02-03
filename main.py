@@ -173,15 +173,7 @@ def main():
 
 if __name__ == "__main__":
     try:
-        if not os.path.exists(config.input_pdf):
-            print(f"❌ Erreur critique : Le fichier source '{config.input_pdf}' est introuvable.")
-            sys.exit(1)
-            
-        try:
-            run_extraction_pipeline(config.input_pdf)
-        except Exception as e:
-            print(f"Erreur main : {e}")
-            
+        main()
     except KeyboardInterrupt:
         print("\n🛑 Interruption par l'utilisateur.")
     except Exception as e:

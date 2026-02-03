@@ -1,5 +1,4 @@
 import pandas as pd
-import os
 import _04_pdf_utils as pdf_utils
 import io
 import openpyxl
@@ -157,6 +156,10 @@ def executer_rapprochement(data_banque, data_compta, data_etat_prec=None, date_r
 
     # --- LOGIQUE DE POINTAGE ---
     for idx_b, row_b in df_banque.iterrows():
+        # IMPORTANT: Si cette ligne banque a déjà été utilisée (par ex. par l'état précédent), on passe.
+        if idx_b in indices_banque_ok:
+            continue
+
         if row_b['debit'] > 0:
             match = df_compta[(df_compta['credit'] == row_b['debit']) & (~df_compta.index.isin(indices_compta_ok))]
             if not match.empty:

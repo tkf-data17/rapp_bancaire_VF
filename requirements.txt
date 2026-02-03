@@ -10,5 +10,5 @@ fpdf
 # pour l'extraction du fichier pdf
 python-dotenv
 PyMuPDF
-pytesseract
+# pytesseract
 supabase

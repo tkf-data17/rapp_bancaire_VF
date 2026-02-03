@@ -54,21 +54,19 @@ def run_extraction_pipeline(input_pdf_path, bank_name=None, status_callback=None
     os.makedirs(csv_output_dir, exist_ok=True)
 
     # -------------------------------------------------------------------------
-    # ÉTAPE 1 : DÉCOUPAGE ET RECONNAISSANCE DE TEXTE (OCR)
+    # ÉTAPE 1 : DÉCOUPAGE DU DOCUMENT SOURCE (MODE NATIF)
     # -------------------------------------------------------------------------
     print("\n" + "-"*50)
-    print("📍 ÉTAPE 1 : Découpage et OCR du document source")
+    print("📍 ÉTAPE 1 : Découpage du document source (sans OCR)")
     print("-"*50)
     
-    # Appel Tesseract
-    # Note: generate_ocr_split retourne le dossier s'il réussit
-    if status_callback: status_callback("Initialisation de l'OCR...")
+    # Appel Split
+    if status_callback: status_callback("Découpage des pages...")
     ocr_result_dir = generate_ocr_split(input_pdf_path, ocr_output_dir, progress_callback=status_callback)
     
     if not ocr_result_dir:
-        print("❌ CRITICAL: OCR result dir is None. Tesseract execution failed.")
-        # On essaie de lever une erreur claire pour l'UI
-        raise RuntimeError("Échec Critique de l'OCR. Tesseract est introuvable ou mal configuré. Vérifier les logs.")
+        print("❌ CRITICAL: Split result dir is None.")
+        raise RuntimeError("Échec du découpage du fichier PDF.")
         
     print(f"✅ Étape 1 terminée. Pages disponibles dans : {ocr_result_dir}")
 

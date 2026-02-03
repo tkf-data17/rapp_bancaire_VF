@@ -10,9 +10,9 @@ WORKDIR /app
 # 2. Installation des dépendances (en tant que root)
 USER root
 RUN apt-get update && apt-get install -y \
-    tesseract-ocr \
-    tesseract-ocr-fra \
-    libtesseract-dev \
+    # tesseract-ocr \
+    # tesseract-ocr-fra \
+    # libtesseract-dev \
     libgl1-mesa-glx \
     libglib2.0-0 \
     gcc \

@@ -1,4 +1,5 @@
 import pandas as pd
+import re
 import _04_pdf_utils as pdf_utils
 import io
 import openpyxl
@@ -84,6 +85,87 @@ def executer_rapprochement(data_banque, data_compta, data_etat_prec=None, date_r
                 indices.append(idx)
                 indices.append(pos_map[target].pop(0))
         return indices
+
+    # ----------------------------------------------------------------------------------
+    # FONCTION OPERATION ANNULEE (NOUVEAU)
+    # Vérifie le restant des transactions non pointées du relevé en opposant débit et crédit.
+    # Si montant identique et libellé similaire (regex), on supprime.
+    # ----------------------------------------------------------------------------------
+    def operation_annulée(df):
+        if df.empty: return df
+        
+        # On travaille sur une copie pour les calculs, mais on veut renvoyer le meme type de DF
+        # On va identifier les indices à supprimer
+        to_drop = []
+        
+        # Séparation (vues)
+        # S'assurer que les colonnes existent
+        if 'debit' not in df.columns or 'credit' not in df.columns:
+            return df
+            
+        debits = df[df['debit'] > 0]
+        credits = df[df['credit'] > 0]
+        
+        # Helper de similarité basé sur les NUMÉROS (ex: N° de chèque)
+        def check_similarity(lib1, lib2):
+            if not isinstance(lib1, str) or not isinstance(lib2, str):
+                return False
+            
+            # Extraction des séquences de chiffres
+            # On cherche des identifiants numériques.
+            # On utilise une regex pour trouver tous les nombres (suite de digits)
+            nums1 = set(re.findall(r'\d+', lib1))
+            nums2 = set(re.findall(r'\d+', lib2))
+            
+            # Filtrage des nombres non significatifs
+            # On ignore les nombres trop courts (ex: 1 ou 2 chiffres) qui pourraient être des jours ou mois isolés
+            # On garde les nombres de longueur >= 3 (ex: 100, 2023, 495839...)
+            # Cela permet de matcher des numéros de chèque (souvent 7 chiffres) ou des années/références
+            nums1 = {n for n in nums1 if len(n) >= 3}
+            nums2 = {n for n in nums2 if len(n) >= 3}
+            
+            # Intersection : Y a-t-il au moins un numéro commun ?
+            common = nums1.intersection(nums2)
+            
+            return len(common) > 0
+
+        # Set des indices utilisés côté crédit pour éviter d'utiliser le meme crédit pour 2 débits
+        used_credit_indices = set()
+        
+        for idx_d, row_d in debits.iterrows():
+            amount = row_d['debit']
+            lib_d = str(row_d.get('libelle', ''))
+            
+            # Candidats crédits (Même montant exact)
+            candidates = credits[
+                (credits['credit'] == amount) & 
+                (~credits.index.isin(used_credit_indices))
+            ]
+            
+            if candidates.empty:
+                continue
+                
+            best_match_idx = None
+            
+            for idx_c, row_c in candidates.iterrows():
+                lib_c = str(row_c.get('libelle', ''))
+                
+                # Check regex similarity
+                if check_similarity(lib_d, lib_c):
+                    best_match_idx = idx_c
+                    break
+            
+            if best_match_idx is not None:
+                # On marque les deux pour suppression
+                to_drop.append(idx_d)
+                to_drop.append(best_match_idx)
+                used_credit_indices.add(best_match_idx)
+                
+        if to_drop:
+            print(f"  --> Opérations annulées détectées et supprimées : {len(to_drop)//2} paires.")
+            return df.drop(to_drop), df.loc[to_drop]
+            
+        return df, pd.DataFrame(columns=df.columns)
 
     drop_d = get_indices_annulation(df_compta, 'debit')
     drop_c = get_indices_annulation(df_compta, 'credit')
@@ -173,6 +255,11 @@ def executer_rapprochement(data_banque, data_compta, data_etat_prec=None, date_r
 
     # --- EXTRACTION DES SUSPENS ---
     suspens_banque = df_banque.drop(indices_banque_ok)
+    
+    # APPLICATION DU FILTRE OPERATION ANNULEE SUR LE RELEVE (SUSPENS)
+    # APPLICATION DU FILTRE OPERATION ANNULEE SUR LE RELEVE (SUSPENS)
+    suspens_banque, ops_annulees_banque = operation_annulée(suspens_banque)
+    
     suspens_compta = df_compta.drop(indices_compta_ok)
 
     # Préparation Export
@@ -188,15 +275,50 @@ def executer_rapprochement(data_banque, data_compta, data_etat_prec=None, date_r
             suspens_compta_export[col_date_compta] = pd.to_datetime(suspens_compta_export[col_date_compta], errors='coerce').dt.strftime('%d/%m/%Y')
         except: pass
 
+    cols_to_drop_annulees = [c for c in ops_annulees_banque.columns if 'solde' in str(c).lower()]
+    ops_annulees_banque_export = ops_annulees_banque.drop(columns=cols_to_drop_annulees)
+
     # Création du buffer Excel
     excel_buffer = io.BytesIO()
     with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
         suspens_banque_export.to_excel(writer, sheet_name='RELEVE_NON_POINTEE', index=False)
         suspens_compta_export.to_excel(writer, sheet_name='JOURNAL_NON_POINTEE', index=False)
+        
+        if not ops_annulees_banque_export.empty:
+            ops_annulees_banque_export.to_excel(writer, sheet_name='OPERATIONS_ANNULEES', index=False)
 
+    # Ajout feuille Rapprochement avec OpenPyXL
     # Ajout feuille Rapprochement avec OpenPyXL
     excel_buffer.seek(0)
     wb = openpyxl.load_workbook(excel_buffer)
+    
+    # -----------------------------------------------------------
+    # MISE EN FORME DES FEUILLES PRECEDENTES (Nombre #,##0)
+    # -----------------------------------------------------------
+    accounting_format = '#,##0'
+    sheets_to_format = ['RELEVE_NON_POINTEE', 'JOURNAL_NON_POINTEE', 'OPERATIONS_ANNULEES']
+    
+    for sh_name in sheets_to_format:
+        if sh_name in wb.sheetnames:
+            ws_tmp = wb[sh_name]
+            # On parcourt les colonnes pour trouver Debit/Credit
+            # On suppose que les en-têtes sont en ligne 1
+            header_cells = list(ws_tmp[1]) # Tuple of cells
+            col_indices_to_format = []
+            
+            for cell in header_cells:
+                val = str(cell.value).lower()
+                if 'debit' in val or 'credit' in val or 'montant' in val:
+                    col_indices_to_format.append(cell.column) # 1-based index
+            
+            if col_indices_to_format:
+                for row in ws_tmp.iter_rows(min_row=2):
+                    for cell in row:
+                        if cell.column in col_indices_to_format:
+                            cell.number_format = accounting_format
+    
+    wb.save(excel_buffer) # Sauvegarde interne avant de continuer
+    
     
     # CALCUL DES SOLDES
     def get_last_solde(df):

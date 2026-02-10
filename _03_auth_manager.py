@@ -108,7 +108,7 @@ def get_user_name(user_id, email): # On passe user_id au lieu d'email pr clé de
     return email
 
 # --- 5. HISTORIQUE (CACHÉ) ---
-@st.cache_data(ttl=60) # On rafraîchit toutes les minutes
+# @st.cache_data(ttl=60) # On rafraîchit toutes les minutes
 def get_history(user_id):
     if not user_id: return []
     client = _get_authenticated_client()
@@ -163,7 +163,7 @@ def login_user(email, password):
         # On vide le cache spécifique pour forcer la recharge des infos du nouvel utilisateur
         get_credits.clear()
         get_user_name.clear()
-        get_history.clear()
+        # get_history.clear() # Cache desactivé
         is_admin.clear()
         return True, "Connexion réussie."
     except Exception as e:
@@ -235,17 +235,31 @@ def update_password(new_password):
 def add_history_remote(user_id, file_info):
     client = _get_authenticated_client()
     try:
-        get_history.clear() # Invalidation car on ajoute une ligne
+        # get_history.clear() # Invalidation car on ajoute une ligne
         data = {
             "user_id": user_id,
             "path": file_info.get('url_excel'), 
             "pdf_path": file_info.get('url_pdf'),
             "banque": file_info.get('banque'),
-            "date_gen": file_info.get('date_gen')
+            "date_gen": file_info.get('date_gen'),
+            "mois": file_info.get('mois')
         }
         client.table("reconciliation_history").insert(data).execute()
     except Exception as e:
-        print(f"Erreur historique: {e}")
+        # Fallback : Si la colonne 'mois' n'est pas trouvée (erreur de cache Schema Supabase), on réessaie sans.
+        err_msg = str(e)
+        if "Could not find the 'mois' column" in err_msg or "PGRST204" in err_msg:
+            try:
+                # On retire 'mois' et on réessaie
+                if 'mois' in data: del data['mois']
+                client.table("reconciliation_history").insert(data).execute()
+                st.warning("Historique sauvegardé sans le mois (Cache Supabase non à jour). Veuillez rafraîchir le cache schéma dans Supabase.")
+                return 
+            except Exception as e2:
+                st.error(f"Erreur de sauvegarde (retry failed): {e2}")
+        else:
+            st.error(f"Erreur sauvegarde historique: {e}")
+            print(f"Erreur historique: {e}")
 
 def upload_to_storage(file_bytes, file_name, content_type="application/pdf"):
     client = _get_authenticated_client()

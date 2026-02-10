@@ -317,59 +317,58 @@ else:
         else:
             # En-têtes du tableau
             with st.container():
-                h1, h2, h3, h4 = st.columns([2, 3, 1, 1])
+                h1, h2, h3, h4, h5 = st.columns([2, 1, 2, 1, 1])
                 h1.markdown("<div style='font-weight:bold; color:#2c3e50; font-size:1.1rem;'>Date</div>", unsafe_allow_html=True)
-                h2.markdown("<div style='font-weight:bold; color:#2c3e50; font-size:1.1rem;'>Banque</div>", unsafe_allow_html=True)
-                h3.markdown("<div style='font-weight:bold; color:#2c3e50; font-size:1.1rem;'>Aperçu</div>", unsafe_allow_html=True)
-                h4.markdown("<div style='font-weight:bold; color:#2c3e50; font-size:1.1rem;'>Télécharger</div>", unsafe_allow_html=True)
+                h2.markdown("<div style='font-weight:bold; color:#2c3e50; font-size:1.1rem;'>Mois</div>", unsafe_allow_html=True)
+                h3.markdown("<div style='font-weight:bold; color:#2c3e50; font-size:1.1rem;'>Banque</div>", unsafe_allow_html=True)
+                h4.markdown("<div style='font-weight:bold; color:#2c3e50; font-size:1.1rem;'>Aperçu</div>", unsafe_allow_html=True)
+                h5.markdown("<div style='font-weight:bold; color:#2c3e50; font-size:1.1rem;'>D/L</div>", unsafe_allow_html=True)
                 st.markdown("<hr style='margin: 5px 0; border: 2px solid #2c3e50;'>", unsafe_allow_html=True)
 
             # Lignes du tableau (Conteneur scrollable)
             # Utilisation de height=... pour fixer la zone et permettre le scroll vertical
             # tout en gardant l'en-tête (défini au dessus) fixe.
             with st.container(height=500):
-                for idx, item in enumerate(reversed(history)):
+                for idx, item in enumerate(history):
                     with st.container():
-                        c1, c2, c3, c4 = st.columns([2, 3, 1, 1])
+                        c1, c2, c3, c4, c5 = st.columns([2, 1, 2, 1, 1])
                         date_gen = item.get('date_gen', 'N/A')
+                        mois_val = item.get('mois', '-') or '-' # Handle None/Empty
                         banque = item.get('banque', 'Inconnue')
                         pdf_path = item.get('url_pdf') or item.get('pdf_path', '')
                         excel_path = item.get('url_excel') or item.get('excel_path', '')
                         
                         # Alignement vertical du texte
                         c1.markdown(f"<div style='padding-top: 10px;'>{date_gen}</div>", unsafe_allow_html=True)
-                        c2.markdown(f"<div style='padding-top: 10px;'>{banque}</div>", unsafe_allow_html=True)
+                        c2.markdown(f"<div style='padding-top: 10px;'>{mois_val}</div>", unsafe_allow_html=True)
+                        c3.markdown(f"<div style='padding-top: 10px;'>{banque}</div>", unsafe_allow_html=True)
                         
                         if pdf_path:
                             if pdf_path.startswith("http"):
                                  # Lien vers le stockage cloud (Supabase)
                                  # Bouton Aperçu (Ouvre dans nouvel onglet)
-                                 c3.markdown(f'<a href="{pdf_path}" target="_blank" style="text-decoration: none;"><button style="border: 1px solid #2196F3; background-color: white; color: #2196F3; padding: 5px 10px; border-radius: 5px; cursor: pointer;">👁️</button></a>', unsafe_allow_html=True)
+                                 c4.markdown(f'<a href="{pdf_path}" target="_blank" style="text-decoration: none;"><button style="border: 1px solid #2196F3; background-color: white; color: #2196F3; padding: 5px 10px; border-radius: 5px; cursor: pointer;">👁️</button></a>', unsafe_allow_html=True)
                                  
-                                 # Bouton Télécharger (Ouvre aussi dans nouvel onglet car c'est un lien direct)
-                                 # Ou on peut essayer de forcer le téléchargement si le navigateur le permet, mais target_blank est standard pour PDF.
-                                 # On change juste le label pour différencier.
-                                 # Pour un vrai "download" silencieux cross-origin, c'est compliqué sans proxy.
-                                 # Ici on met un bouton explicite "Télécharger" qui pointe vers le même lien.
-                                 c4.markdown(f'<a href="{pdf_path}" target="_blank" style="text-decoration: none;"><button style="border: 1px solid #4CAF50; background-color: white; color: #4CAF50; padding: 5px 10px; border-radius: 5px; cursor: pointer;">⇩</button></a>', unsafe_allow_html=True)
+                                 # Bouton Télécharger
+                                 c5.markdown(f'<a href="{pdf_path}" target="_blank" style="text-decoration: none;"><button style="border: 1px solid #4CAF50; background-color: white; color: #4CAF50; padding: 5px 10px; border-radius: 5px; cursor: pointer;">⇩</button></a>', unsafe_allow_html=True)
                                  
                             elif os.path.exists(pdf_path):
                                 # Fichier local
                                 with open(pdf_path, "rb") as f:
-                                    c3.download_button(
+                                    c4.download_button(
                                         label="⇩",
                                         data=f,
                                         file_name=os.path.basename(pdf_path),
                                         mime="application/pdf",
                                         key=f"dl_pdf_{idx}"
                                     )
-                                    c4.write("") # Pas d'aperçu simple pour fichiers locaux sans serveur de fichiers static
+                                    c5.write("")
                             else:
-                                c3.markdown("<span style='color: grey;'>-</span>", unsafe_allow_html=True)
                                 c4.markdown("<span style='color: grey;'>-</span>", unsafe_allow_html=True)
+                                c5.markdown("<span style='color: grey;'>-</span>", unsafe_allow_html=True)
                         else:
-                            c3.markdown("<span style='color: grey;'>-</span>", unsafe_allow_html=True)
                             c4.markdown("<span style='color: grey;'>-</span>", unsafe_allow_html=True)
+                            c5.markdown("<span style='color: grey;'>-</span>", unsafe_allow_html=True)
                             
 
                         # Séparateur de ligne
@@ -611,6 +610,11 @@ else:
         banques = ["Orabank", "BOA", "UTB", "Sunu Bank"]
         choix_banque = st.selectbox("Sélectionnez votre banque", banques, key=f"banque_{st.session_state.reset_key}")
     
+    with cols_sel[1]:
+        mois_options = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", 
+                        "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"]
+        mois_rapprochement = st.selectbox("Mois de rapprochement", mois_options, key=f"mois_rap_{st.session_state.reset_key}")
+
     with cols_sel[2]:
         date_arrete = st.date_input("Date de rapprochement", key=f"date_{st.session_state.reset_key}")
     
@@ -772,9 +776,13 @@ else:
                         'url_excel': url_excel,
                         'url_pdf': url_pdf,
                         'banque': choix_banque,
-                        'date_gen': date_display 
+                        'date_gen': date_display,
+                        'mois': mois_rapprochement
                     })
 
+
+                    # Invalidation explicite du cache historique
+                    # auth_manager.get_history.clear()
 
                     # NETTOYAGE DES FICHIERS TEMPORAIRES ET SOURCE
                     # Uniquement si un PDF a été traité (temp_pdf_path défini)

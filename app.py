@@ -863,7 +863,9 @@ else:
             # On ne touche pas aux dates/libellés qui ne sont pas des floats convertibles (ou alors on checke l'erreur)
             # L'astuce est d'appliquer uniquement si c'est convertible
             
-            df_rapp = df_rapp.applymap(lambda x: format_accounting(x))
+            # Compatibilité pandas : applymap supprimé dans pandas >= 2.1.0, remplacé par map
+            _apply_fn = df_rapp.map if hasattr(df_rapp, 'map') else df_rapp.applymap
+            df_rapp = _apply_fn(lambda x: format_accounting(x))
 
             # Force string type for all columns to avoid PyArrow mixed type errors (int vs str)
             # Déjà fait par le formatage qui retourne des strings

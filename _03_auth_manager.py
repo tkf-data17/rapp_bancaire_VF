@@ -1,9 +1,7 @@
 import streamlit as st
 from supabase import create_client, Client
-
-
-# --- 1. INITIALISATION AVEC CACHE ---
 import os
+from _00_logger import log
 
 def get_config(section, key, env_var_name=None):
     """Récupère une config depuis st.secrets ou os.environ."""
@@ -34,8 +32,8 @@ def get_supabase_client() -> Client:
               get_config("supabase", "api_key", "SUPABASE_API_KEY")
 
         if not url or not key:
-            # Initialisation échouée : On l'affiche clairement pour le débogage sur le cloud
             error_msg = "❌ Configuration Supabase incomplète. Les variables d'environnement 'SUPABASE_URL' et 'SUPABASE_KEY' sont introuvables."
+            log("CRITICAL", "auth", "Configuration Supabase manquante (URL ou KEY absente)")
             print(error_msg)
             st.error(error_msg)
             return None
@@ -43,9 +41,10 @@ def get_supabase_client() -> Client:
         # Fix warning: Storage endpoint URL should have a trailing slash
         if not url.endswith("/"):
              url += "/"
-             
+
         return create_client(url, key)
     except Exception as e:
+        log("CRITICAL", "auth", "Erreur critique lors de la création du client Supabase", exc=e)
         st.error(f"Erreur de configuration Supabase : {e}")
         return None
 
@@ -107,13 +106,20 @@ def get_user_name(user_id, email): # On passe user_id au lieu d'email pr clé de
         pass
     return email
 
-# --- 5. HISTORIQUE (CACHÉ) ---
-# @st.cache_data(ttl=60) # On rafraîchit toutes les minutes
-def get_history(user_id):
+# --- 5. HISTORIQUE (CACHÉ 30s — imperceptible utilisateur, économise les requêtes Supabase) ---
+@st.cache_data(ttl=30)
+def get_history(user_id, limit=50):
     if not user_id: return []
     client = _get_authenticated_client()
     try:
-        response = client.table("reconciliation_history").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
+        response = (
+            client.table("reconciliation_history")
+            .select("*")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
         return response.data
     except Exception as e:
         return []
@@ -165,11 +171,17 @@ def login_user(email, password):
         get_user_name.clear()
         # get_history.clear() # Cache desactivé
         is_admin.clear()
+        log("INFO", "auth", "Connexion réussie", {"email": email})
         return True, "Connexion réussie."
     except Exception as e:
         msg = str(e)
         if "Invalid login credentials" in msg:
+            log("WARN", "auth", "Tentative de connexion échouée (mauvais identifiants)", {"email": email})
             return False, "Identifiants incorrects."
+        if "timed out" in msg.lower() or "connection" in msg.lower():
+            log("ERROR", "auth", "Timeout connexion Supabase", {"email": email}, exc=e)
+            return False, "Impossible de joindre le serveur. Vérifiez votre connexion internet ou que le projet Supabase est actif (il se met en veille après 7 jours d'inactivité)."
+        log("ERROR", "auth", "Erreur de connexion inattendue", {"email": email}, exc=e)
         return False, f"Erreur de connexion : {msg}"
 
 def register_user(email, password, nom, prenoms, telephone, entreprise):
@@ -187,8 +199,10 @@ def register_user(email, password, nom, prenoms, telephone, entreprise):
                 }
             }
         })
+        log("INFO", "auth", "Nouvel utilisateur inscrit", {"email": email})
         return True, "Compte créé avec succès ! Veuillez vérifier votre boîte mail."
     except Exception as e:
+        log("ERROR", "auth", "Erreur inscription", {"email": email}, exc=e)
         return False, f"Erreur d'inscription : {e}"
 
 def decrement_credits(user_id):
@@ -197,14 +211,17 @@ def decrement_credits(user_id):
         # Lecture directe pour avoir la valeur réelle (hors cache)
         data = client.table("user_profiles").select("credits").eq("id", user_id).single().execute()
         current = data.data.get('credits', 0)
-        
+
         if current > 0:
             client.table("user_profiles").update({"credits": current - 1}).eq("id", user_id).execute()
             # On invalide le cache pour que l'interface affiche la nouvelle valeur
             get_credits.clear()
+            log("INFO", "auth", "Crédit décrémenté", {"user_id": user_id[:8] + "...", "credits_restants": current - 1})
             return True
-    except:
-        pass
+        else:
+            log("WARN", "auth", "Décrément impossible : crédits déjà à 0", {"user_id": user_id[:8] + "..."})
+    except Exception as e:
+        log("ERROR", "auth", "Erreur lors du décrément de crédits", exc=e)
     return False
 
 def send_password_reset(email):
@@ -238,13 +255,14 @@ def add_history_remote(user_id, file_info):
         # get_history.clear() # Invalidation car on ajoute une ligne
         data = {
             "user_id": user_id,
-            "path": file_info.get('url_excel'), 
+            "path": file_info.get('url_excel'),
             "pdf_path": file_info.get('url_pdf'),
             "banque": file_info.get('banque'),
             "date_gen": file_info.get('date_gen'),
             "mois": file_info.get('mois')
         }
         client.table("reconciliation_history").insert(data).execute()
+        log("INFO", "auth", "Historique sauvegardé", {"banque": file_info.get('banque'), "mois": file_info.get('mois')})
     except Exception as e:
         # Fallback : Si la colonne 'mois' n'est pas trouvée (erreur de cache Schema Supabase), on réessaie sans.
         err_msg = str(e)
@@ -253,11 +271,14 @@ def add_history_remote(user_id, file_info):
                 # On retire 'mois' et on réessaie
                 if 'mois' in data: del data['mois']
                 client.table("reconciliation_history").insert(data).execute()
+                log("WARN", "auth", "Historique sauvegardé sans la colonne 'mois' (cache Supabase)", {"banque": file_info.get('banque')})
                 st.warning("Historique sauvegardé sans le mois (Cache Supabase non à jour). Veuillez rafraîchir le cache schéma dans Supabase.")
-                return 
+                return
             except Exception as e2:
+                log("ERROR", "auth", "Erreur sauvegarde historique (retry échoué)", exc=e2)
                 st.error(f"Erreur de sauvegarde (retry failed): {e2}")
         else:
+            log("ERROR", "auth", "Erreur sauvegarde historique", exc=e)
             st.error(f"Erreur sauvegarde historique: {e}")
             print(f"Erreur historique: {e}")
 
@@ -265,7 +286,7 @@ def upload_to_storage(file_bytes, file_name, content_type="application/pdf"):
     client = _get_authenticated_client()
     user_id = st.session_state.get('user_id')
     if not user_id: return None
-    
+
     try:
         destination_path = f"{user_id}/{file_name}"
         client.storage.from_("reports").upload(
@@ -273,8 +294,11 @@ def upload_to_storage(file_bytes, file_name, content_type="application/pdf"):
             path=destination_path,
             file_options={"content-type": content_type, "upsert": "true"}
         )
-        return client.storage.from_("reports").get_public_url(destination_path)
+        url = client.storage.from_("reports").get_public_url(destination_path)
+        log("INFO", "auth", "Fichier uploadé vers Supabase Storage", {"fichier": file_name, "path": destination_path})
+        return url
     except Exception as e:
+        log("ERROR", "auth", "Erreur upload Supabase Storage", {"fichier": file_name}, exc=e)
         st.error(f"Erreur upload: {e}")
         return None
 

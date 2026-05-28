@@ -4,6 +4,7 @@ import _04_pdf_utils as pdf_utils
 import io
 import openpyxl
 from openpyxl.styles import Font, Alignment, Border, Side
+from _00_logger import log
 
 def executer_rapprochement(data_banque, data_compta, data_etat_prec=None, date_rapprochement=None):
     """
@@ -44,10 +45,15 @@ def executer_rapprochement(data_banque, data_compta, data_etat_prec=None, date_r
     try:
         df_banque_raw = load_data(data_banque) # Gardé pour recherche solde
         df_compta_raw = load_data(data_compta, header=0) # Gardé pour recherche solde
-        
+
         df_banque = df_banque_raw.copy()
         df_compta = df_compta_raw.copy()
+        log("INFO", "rapp", "Chargement des données OK", {
+            "nb_lignes_banque": len(df_banque),
+            "nb_lignes_compta": len(df_compta)
+        })
     except Exception as e:
+        log("CRITICAL", "rapp", "Erreur lors du chargement des données", exc=e)
         raise ValueError(f"Erreur lors du chargement des données : {e}")
 
     # Normalisation des noms de colonnes (Débit -> debit, Crédit -> credit)
@@ -92,7 +98,7 @@ def executer_rapprochement(data_banque, data_compta, data_etat_prec=None, date_r
     # Si montant identique et libellé similaire (regex), on supprime.
     # ----------------------------------------------------------------------------------
     def operation_annulée(df):
-        if df.empty: return df
+        if df.empty: return df, pd.DataFrame(columns=df.columns)
         
         # On travaille sur une copie pour les calculs, mais on veut renvoyer le meme type de DF
         # On va identifier les indices à supprimer
@@ -170,9 +176,9 @@ def executer_rapprochement(data_banque, data_compta, data_etat_prec=None, date_r
     drop_d = get_indices_annulation(df_compta, 'debit')
     drop_c = get_indices_annulation(df_compta, 'credit')
     indices_a_supprimer = list(set(drop_d + drop_c))
-    
+
     if indices_a_supprimer:
-        # print(f"Suppression de {len(indices_a_supprimer)} lignes d'annulations dans le journal.")
+        log("INFO", "rapp", "Annulations journal supprimées", {"nb_annulations": len(indices_a_supprimer)})
         df_compta = df_compta.drop(indices_a_supprimer)
 
     # Listes pour stocker les lignes rapprochées
@@ -183,7 +189,7 @@ def executer_rapprochement(data_banque, data_compta, data_etat_prec=None, date_r
 
     # --- LOGIQUE POINTAGE PREALABLE (ETAT PRECEDENT) ---
     if data_etat_prec is not None:
-        print(f"Traitement de l'état précédent...")
+        log("INFO", "rapp", "Traitement de l'état précédent démarré")
         try:
             df_etat = load_data(data_etat_prec, header=None)
             
@@ -234,33 +240,48 @@ def executer_rapprochement(data_banque, data_compta, data_etat_prec=None, date_r
                         })
 
         except Exception as e:
-            print(f"Erreur état précédent : {e}")
+            log("ERROR", "rapp", "Erreur traitement état précédent", exc=e)
 
     # --- LOGIQUE DE POINTAGE ---
+    # Tolérance de 0.01 sur les montants pour éviter les faux non-match dus aux arrondis float
+    FLOAT_TOL = 0.01
+
     for idx_b, row_b in df_banque.iterrows():
         # IMPORTANT: Si cette ligne banque a déjà été utilisée (par ex. par l'état précédent), on passe.
         if idx_b in indices_banque_ok:
             continue
 
         if row_b['debit'] > 0:
-            match = df_compta[(df_compta['credit'] == row_b['debit']) & (~df_compta.index.isin(indices_compta_ok))]
+            match = df_compta[
+                (abs(df_compta['credit'] - row_b['debit']) < FLOAT_TOL) &
+                (~df_compta.index.isin(indices_compta_ok))
+            ]
             if not match.empty:
                 indices_banque_ok.append(idx_b)
                 indices_compta_ok.append(match.index[0])
         elif row_b['credit'] > 0:
-            match = df_compta[(df_compta['debit'] == row_b['credit']) & (~df_compta.index.isin(indices_compta_ok))]
+            match = df_compta[
+                (abs(df_compta['debit'] - row_b['credit']) < FLOAT_TOL) &
+                (~df_compta.index.isin(indices_compta_ok))
+            ]
             if not match.empty:
                 indices_banque_ok.append(idx_b)
                 indices_compta_ok.append(match.index[0])
 
     # --- EXTRACTION DES SUSPENS ---
     suspens_banque = df_banque.drop(indices_banque_ok)
-    
-    # APPLICATION DU FILTRE OPERATION ANNULEE SUR LE RELEVE (SUSPENS)
+
     # APPLICATION DU FILTRE OPERATION ANNULEE SUR LE RELEVE (SUSPENS)
     suspens_banque, ops_annulees_banque = operation_annulée(suspens_banque)
-    
+
     suspens_compta = df_compta.drop(indices_compta_ok)
+
+    log("INFO", "rapp", "Pointage terminé", {
+        "pointes_banque": len(indices_banque_ok),
+        "pointes_compta": len(indices_compta_ok),
+        "suspens_banque": len(suspens_banque),
+        "suspens_compta": len(suspens_compta)
+    })
 
     # Préparation Export
     cols_to_drop_banque = [c for c in suspens_banque.columns if 'solde' in str(c).lower()]
@@ -273,7 +294,7 @@ def executer_rapprochement(data_banque, data_compta, data_etat_prec=None, date_r
     if col_date_compta:
         try:
             suspens_compta_export[col_date_compta] = pd.to_datetime(suspens_compta_export[col_date_compta], errors='coerce').dt.strftime('%d/%m/%Y')
-        except: pass
+        except Exception: pass
 
     cols_to_drop_annulees = [c for c in ops_annulees_banque.columns if 'solde' in str(c).lower()]
     ops_annulees_banque_export = ops_annulees_banque.drop(columns=cols_to_drop_annulees)
@@ -293,30 +314,74 @@ def executer_rapprochement(data_banque, data_compta, data_etat_prec=None, date_r
     wb = openpyxl.load_workbook(excel_buffer)
     
     # -----------------------------------------------------------
-    # MISE EN FORME DES FEUILLES PRECEDENTES (Nombre #,##0)
+    # MISE EN FORME DES FEUILLES SUSPENS ET OPÉRATIONS ANNULÉES
     # -----------------------------------------------------------
+    from openpyxl.styles import PatternFill
+
     accounting_format = '#,##0'
     sheets_to_format = ['RELEVE_NON_POINTEE', 'JOURNAL_NON_POINTEE', 'OPERATIONS_ANNULEES']
-    
+
+    header_fill  = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+    bold_font_s  = Font(bold=True)
+    thin_border_s = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin')
+    )
+    center_align_s = Alignment(horizontal="center", vertical="center")
+    left_align_s   = Alignment(horizontal="left",   vertical="center")
+
     for sh_name in sheets_to_format:
-        if sh_name in wb.sheetnames:
-            ws_tmp = wb[sh_name]
-            # On parcourt les colonnes pour trouver Debit/Credit
-            # On suppose que les en-têtes sont en ligne 1
-            header_cells = list(ws_tmp[1]) # Tuple of cells
-            col_indices_to_format = []
-            
-            for cell in header_cells:
-                val = str(cell.value).lower()
-                if 'debit' in val or 'credit' in val or 'montant' in val:
-                    col_indices_to_format.append(cell.column) # 1-based index
-            
-            if col_indices_to_format:
-                for row in ws_tmp.iter_rows(min_row=2):
-                    for cell in row:
-                        if cell.column in col_indices_to_format:
-                            cell.number_format = accounting_format
-    
+        if sh_name not in wb.sheetnames:
+            continue
+        ws_tmp = wb[sh_name]
+        if ws_tmp.max_row < 1:
+            continue
+
+        header_cells = list(ws_tmp[1])
+        col_amount_idx  = []
+        col_date_idx    = []
+        col_libelle_idx = []
+
+        for cell in header_cells:
+            val = str(cell.value or '').lower()
+            if 'debit' in val or 'credit' in val or 'montant' in val:
+                col_amount_idx.append(cell.column)
+            elif 'date' in val:
+                col_date_idx.append(cell.column)
+            elif 'libell' in val:
+                col_libelle_idx.append(cell.column)
+
+        # En-tête : gras + fond coloré + bordure + centré
+        for cell in header_cells:
+            cell.font      = bold_font_s
+            cell.fill      = header_fill
+            cell.border    = thin_border_s
+            cell.alignment = center_align_s
+
+        # Largeurs de colonnes
+        for cell in header_cells:
+            col_letter = cell.column_letter
+            if cell.column in col_libelle_idx:
+                ws_tmp.column_dimensions[col_letter].width = 45
+            elif cell.column in col_date_idx:
+                ws_tmp.column_dimensions[col_letter].width = 14
+            elif cell.column in col_amount_idx:
+                ws_tmp.column_dimensions[col_letter].width = 16
+            else:
+                ws_tmp.column_dimensions[col_letter].width = 18
+
+        # Données : bordures + format montant + alignement
+        for row in ws_tmp.iter_rows(min_row=2, max_row=ws_tmp.max_row):
+            for cell in row:
+                cell.border = thin_border_s
+                if cell.column in col_amount_idx:
+                    cell.number_format = accounting_format
+                    cell.alignment     = center_align_s
+                elif cell.column in col_date_idx:
+                    cell.alignment = center_align_s
+                else:
+                    cell.alignment = left_align_s
+
     wb.save(excel_buffer) # Sauvegarde interne avant de continuer
     
     
@@ -510,20 +575,17 @@ def executer_rapprochement(data_banque, data_compta, data_etat_prec=None, date_r
     final_excel.seek(0)
     
     # --- PDF GENERATION ---
-    t_c = sum(op.get('col_C', 0) for op in all_ops)
-    t_d = sum(op.get('col_D', 0) for op in all_ops)
-    t_e = sum(op.get('col_E', 0) for op in all_ops)
-    t_f = sum(op.get('col_F', 0) for op in all_ops)
-    
+    # Réutilisation des totaux déjà calculés pour la feuille Excel
+    # (v_solde_compta, v_solde_banque, s_c..s_f sont dans le scope)
     try: val_solde_compta = float(solde_compta) if solde_compta else 0
-    except: val_solde_compta = 0
+    except Exception: val_solde_compta = 0
     try: val_solde_banque = float(solde_banque) if solde_banque else 0
-    except: val_solde_banque = 0
-    
-    total_C = val_solde_compta + t_c
-    total_D = t_d
-    total_E = t_e
-    total_F = val_solde_banque + t_f
+    except Exception: val_solde_banque = 0
+
+    total_C = val_solde_compta + s_c
+    total_D = s_d
+    total_E = s_e
+    total_F = val_solde_banque + s_f
     totals = {'C': total_C, 'D': total_D, 'E': total_E, 'F': total_F}
     
     rect_C, rect_D, rect_E, rect_F = 0, 0, 0, 0
@@ -546,5 +608,14 @@ def executer_rapprochement(data_banque, data_compta, data_etat_prec=None, date_r
         'suspens_banque': len(suspens_banque),
         'suspens_compta': len(suspens_compta)
     }
-    
+
+    log("INFO", "rapp", "Rapprochement terminé", {
+        "suspens_banque": stats['suspens_banque'],
+        "suspens_compta": stats['suspens_compta'],
+        "solde_banque": solde_banque,
+        "solde_compta": solde_compta,
+        "total_C": total_C,
+        "total_F": total_F
+    })
+
     return final_excel, pdf_bytes, stats

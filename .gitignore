@@ -2,6 +2,7 @@
 # CRITIQUE : Ne jamais envoyer ces fichiers qui contiennent vos mots de passe/clés API
 .env
 .streamlit/secrets.toml
+.streamlit/secrets_docker.toml
 
 supabase/.temp/
 # --- Virtual Environments ---
@@ -16,6 +17,9 @@ temp_proc/
 temp_uploads/
 __pycache__/
 *.pyc
+
+# --- Debug Log (généré automatiquement, ne pas committer) ---
+debug_log.json
 
 # --- User Data & Documents ---
 # Eviter d'envoyer les relevés bancaires personnels ou les exports

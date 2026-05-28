@@ -1,5 +1,10 @@
 import streamlit as st
 import os
+import re
+import io
+import uuid
+import pathlib
+import traceback
 import _02_rapp as rapp  # Import du module de traitement
 import _05_style as style # Import du fichier de style
 import base64
@@ -9,8 +14,41 @@ import main as pdf_extractor # Pipeline d extraction
 import pandas as pd
 import datetime
 import time
+from _00_logger import log, clear_log
 
 
+def _validate_password(password):
+    """Valide la robustesse d'un mot de passe. Retourne (ok, message_erreur)."""
+    if len(password) < 12:
+        return False, "Le mot de passe doit faire au moins 12 caractères."
+    if not any(c.isupper() for c in password):
+        return False, "Le mot de passe doit contenir au moins une majuscule."
+    if not any(c.isdigit() for c in password):
+        return False, "Le mot de passe doit contenir au moins un chiffre."
+    return True, ""
+
+
+
+
+def _check_login_rate_limit(email):
+    """Bloque après 5 tentatives échouées en 15 minutes. Retourne (autorisé, msg)."""
+    if 'login_attempts' not in st.session_state:
+        st.session_state.login_attempts = {}
+    now = time.time()
+    key = email.strip().lower()
+    attempts, first_time = st.session_state.login_attempts.get(key, (0, now))
+    if (now - first_time) > 900:  # fenêtre de 15 min expirée → reset
+        st.session_state.login_attempts[key] = (1, now)
+        return True, ""
+    if attempts >= 5:
+        wait = int(900 - (now - first_time))
+        return False, f"Trop de tentatives. Réessayez dans {wait // 60}m{wait % 60:02d}s."
+    st.session_state.login_attempts[key] = (attempts + 1, first_time)
+    return True, ""
+
+def _reset_login_attempts(email):
+    if 'login_attempts' in st.session_state:
+        st.session_state.login_attempts.pop(email.strip().lower(), None)
 
 
 # Configuration de la page
@@ -36,6 +74,16 @@ def reset_callback():
 def logout():
     st.session_state.authenticated = False
     st.session_state.user_email = ""
+
+def _load_input(file_upload):
+    """Charge un fichier Excel ou CSV uploadé en DataFrame (utilitaire module)."""
+    ext = file_upload.name.split('.')[-1].lower()
+    if ext == 'csv':
+        return pd.read_csv(file_upload)
+    elif ext == 'xls':
+        return pd.read_excel(file_upload, engine='xlrd')
+    else:
+        return pd.read_excel(file_upload, engine='openpyxl')
 
 
 # Gestion du logout via URL (pour le bouton dans le header)
@@ -148,17 +196,19 @@ if st.session_state.get('password_reset_mode', False):
     if btn_change:
         if new_pass != new_pass_conf:
             st.error("Les mots de passe ne correspondent pas.")
-        elif len(new_pass) < 6:
-            st.error("Le mot de passe doit faire au moins 6 caractères.")
         else:
-            success, msg = auth_manager.update_password(new_pass)
-            if success:
-                st.success(msg)
-                st.session_state.password_reset_mode = False # On quitte le mode reset
-                time.sleep(2)
-                st.rerun()
+            pw_ok, pw_msg = _validate_password(new_pass)
+            if not pw_ok:
+                st.error(pw_msg)
             else:
-                st.error(msg)
+                success, msg = auth_manager.update_password(new_pass)
+                if success:
+                    st.success(msg)
+                    st.session_state.password_reset_mode = False
+                    time.sleep(2)
+                    st.rerun()
+                else:
+                    st.error(msg)
     
     st.stop() # On affiche QUE ça
 
@@ -189,14 +239,19 @@ if not st.session_state.authenticated:
                 submitted = st.form_submit_button("Se connecter", type="primary")
             
             if submitted:
-                success, msg = auth_manager.login_user(login_email, login_pass)
-                if success:
-                    st.session_state.authenticated = True
-                    st.session_state.user_email = login_email
-                    st.success(msg)
-                    st.rerun()
+                allowed, rate_msg = _check_login_rate_limit(login_email)
+                if not allowed:
+                    st.error(rate_msg)
                 else:
-                    st.error(msg)
+                    success, msg = auth_manager.login_user(login_email, login_pass)
+                    if success:
+                        _reset_login_attempts(login_email)
+                        st.session_state.authenticated = True
+                        st.session_state.user_email = login_email
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
             
             st.write("")
             with st.expander("Mot de passe oublié ?"):
@@ -243,24 +298,23 @@ if not st.session_state.authenticated:
                 if reg_pass != reg_pass_confirm:
                     st.error("Les mots de passe ne correspondent pas.")
                 else:
-                    full_phone = f"{phone_code} {phone_number}"
-                    success, msg = auth_manager.register_user(reg_email, reg_pass, reg_nom, reg_prenoms, full_phone, reg_ent)
-                    if success:
-                        st.success(msg)
-                        time.sleep(2)
-                        
-                        # On vide les champs manuellement en forçant des valeurs vides
-                        keys_to_clear = ["reg_email", "reg_nom", "reg_prenoms", "reg_tel_num", "reg_ent", "reg_pass", "reg_pass_conf"]
-                        for key in keys_to_clear:
-                             st.session_state[key] = ""
-                        
-                        # Pour le selectbox, on ne peut pas mettre "", on laisse le rerun le remettre à defaut ou on force l'index 0 si besoin
-                        if "reg_ind" in st.session_state:
-                             del st.session_state["reg_ind"]
-                        
-                        st.rerun()
+                    pw_ok, pw_msg = _validate_password(reg_pass)
+                    if not pw_ok:
+                        st.error(pw_msg)
                     else:
-                        st.error(msg)
+                        full_phone = f"{phone_code} {phone_number}"
+                        success, msg = auth_manager.register_user(reg_email, reg_pass, reg_nom, reg_prenoms, full_phone, reg_ent)
+                        if success:
+                            st.success(msg)
+                            time.sleep(2)
+                            keys_to_clear = ["reg_email", "reg_nom", "reg_prenoms", "reg_tel_num", "reg_ent", "reg_pass", "reg_pass_conf"]
+                            for key in keys_to_clear:
+                                st.session_state[key] = ""
+                            if "reg_ind" in st.session_state:
+                                del st.session_state["reg_ind"]
+                            st.rerun()
+                        else:
+                            st.error(msg)
 
 # ==============================================================================
 # APPLICATION PRINCIPALE (Si connecté)
@@ -290,8 +344,7 @@ else:
     # Espaceur
     st.sidebar.markdown("<br>" * 3, unsafe_allow_html=True)
     
-    if st.sidebar.button("NOUVEL E.R", on_click=reset_callback):
-        pass # Le callback fait tout
+    st.sidebar.button("NOUVEL E.R", on_click=reset_callback)
 
     # --- EN-TETE ---
     # (La fonction get_img_as_base64 est maintenant définie globalement)
@@ -607,7 +660,7 @@ else:
     # Sélection de la banque et Date
     cols_sel = st.columns(4)
     with cols_sel[0]:
-        banques = ["Orabank", "BOA", "UTB", "Sunu Bank"]
+        banques = ["Orabank", "Trésor", "BOA", "UTB", "Sunu Bank"]
         choix_banque = st.selectbox("Sélectionnez votre banque", banques, key=f"banque_{st.session_state.reset_key}")
     
     with cols_sel[1]:
@@ -636,7 +689,7 @@ else:
         journal_file = st.file_uploader("Ajoutez votre journal banque", type=['xlsx', 'xls'], key=f"journal_{st.session_state.reset_key}")
     
     st.markdown("---")
-    
+
     # Bouton de validation
     if st.button("Valider"):
         if auth_manager.get_credits(user_id) <= 0:
@@ -655,16 +708,25 @@ else:
             start_time = time.time()
             with st.spinner('Traitement en cours...'):
                 try:
+                    # On vide le log à chaque nouveau traitement pour un débug propre
+                    clear_log()
+                    log("INFO", "app", "Nouveau rapprochement lancé", {
+                        "banque": choix_banque,
+                        "mois": mois_rapprochement,
+                        "date_arrete": str(date_arrete),
+                        "releve": releve_file.name if releve_file else None,
+                        "journal": journal_file.name if journal_file else None,
+                        "etat_prec": etat_prec_file.name if etat_prec_file else None
+                    })
+
+                    # --- DÉCRÉMENT ATOMIQUE : avant le traitement lourd ---
+                    # Empêche les soumissions simultanées avec 1 seul crédit
+                    credit_decremented = auth_manager.decrement_credits(user_id)
+                    if not credit_decremented:
+                        log("WARN", "app", "Traitement refusé : crédits insuffisants ou erreur décrément")
+                        st.error("Crédits insuffisants ou erreur lors de la vérification. Veuillez réessayer.")
+                        st.stop()
                     # Préparation des données en mémoire (sans sauvegarde des inputs)
-                    def load_input(file_upload):
-                        ext = file_upload.name.split('.')[-1].lower()
-                        if ext == 'csv':
-                             return pd.read_csv(file_upload)
-                        elif ext == 'xls':
-                            return pd.read_excel(file_upload, engine='xlrd')
-                        else:
-                            # Default to openpyxl for xlsx or others
-                            return pd.read_excel(file_upload, engine='openpyxl')
 
                     # Gestion du Relevé Bancaire (PDF OBLIGATOIRE selon la demande, mais on gère si jamais)
                     df_releve = None
@@ -675,64 +737,64 @@ else:
                         status_text = st.empty()
                         status_text.info("Etat de Rapprochement en cours de traitement... (Veuillez patienter quelques secondes)")
                         
-                        # Création d'un fichier temporaire pour le PDF
+                        # Validation et création du fichier temporaire
+                        MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50 MB
+                        file_bytes = file_upload.getvalue()
+                        if len(file_bytes) > MAX_UPLOAD_SIZE:
+                            st.error(f"Fichier trop volumineux ({len(file_bytes)//1024//1024} MB). Maximum : 50 MB.")
+                            st.stop()
+                        if pathlib.Path(file_upload.name).suffix.lower() != ".pdf":
+                            st.error("Seuls les fichiers PDF sont acceptés.")
+                            st.stop()
+
+                        os.makedirs("temp_uploads", exist_ok=True)
+                        # Nom opaque basé sur UUID pour éviter tout path traversal
+                        temp_pdf_path = os.path.join("temp_uploads", f"{uuid.uuid4().hex}.pdf")
+
                         try:
-                            # Dossier temporaire pour les uploads
-                            os.makedirs("temp_uploads", exist_ok=True)
-                            temp_pdf_path = os.path.join("temp_uploads", file_upload.name)
-                            
                             with open(temp_pdf_path, "wb") as f:
-                                f.write(file_upload.getbuffer())
-                                
-                        # Lancement du pipeline d'extraction via main.py / run_extraction_pipeline
+                                f.write(file_bytes)
+
                             with st.status("Traitement en cours...", expanded=True) as status:
-                                # st.write("Préparation de l'environnement...")
-                                
-                                # Callback pour mettre à jour le statut
                                 def update_status(msg):
                                     if not msg.startswith("OCR page") and not msg.startswith("Traitement OCR"):
                                         status.update(label=msg)
-                                
-                                extracted_excel_path = pdf_extractor.run_extraction_pipeline(temp_pdf_path, bank_name=choix_banque, status_callback=update_status)                            
-                                
+
+                                extracted_excel_path = pdf_extractor.run_extraction_pipeline(temp_pdf_path, bank_name=choix_banque, status_callback=update_status)
+
                                 if extracted_excel_path and os.path.exists(extracted_excel_path):
                                     status.update(label="Extraction terminée !", state="complete", expanded=False)
-                                    
+
                                     df_releve = pd.read_excel(extracted_excel_path, engine='openpyxl')
-                                    
-                                    # Chargement des données pour le bouton de téléchargement (hors du bloc status pour visibilité)
+
                                     with open(extracted_excel_path, "rb") as f:
                                         excel_data = f.read()
                                     excel_name = os.path.basename(extracted_excel_path)
-                                    
-                                    time.sleep(1) 
+
+                                    time.sleep(1)
                                 else:
                                     status.update(label="Échec de l'extraction", state="error")
                                     st.error("L'extraction du PDF a échoué (Résultat vide). Vérifiez si le PDF est valide.")
                                     st.stop()
-                                               
+
                         except ValueError as ve:
-                             status_text.empty()
-                             status.update(label="Opération annulée", state="error", expanded=False)
-                             # Affiche le message "cette banque n'est pas actif..." proprement
-                             st.error(str(ve))
-                             st.stop()
-                                
-                        except Exception as e:
-                            st.error(f"Erreur CRITIQUE lors de l'analyse du PDF : {e}")
-                            with st.expander("Voir les détails techniques (pour support)"):
-                                st.code(str(e))
-                                import traceback
-                                st.code(traceback.format_exc())
+                            status_text.empty()
+                            st.error(str(ve))
                             st.stop()
+
+                        except Exception as e:
+                            log("CRITICAL", "app", "Erreur extraction PDF", {"pdf": file_upload.name}, exc=e)
+                            st.error("Une erreur est survenue lors de l'analyse du PDF. Vérifiez le fichier et réessayez.")
+                            st.stop()
+
                         finally:
-                            # Nettoyage facultatif du PDF uploadé
-                            pass 
+                            if os.path.exists(temp_pdf_path):
+                                os.remove(temp_pdf_path)
                     else:
                         # Si l'utilisateur force un Excel (non recommandé vu la consigne, mais robuste)
-                        df_releve = load_input(releve_file)
+                        df_releve = _load_input(releve_file)
 
-                    df_journal = load_input(journal_file)
+                    df_journal = _load_input(journal_file)
                     
                     df_etat = None
                     if etat_prec_file:
@@ -747,7 +809,9 @@ else:
                     
                     # Exécution du rapprochement en mémoire
                     # IMPORTANT : df_releve contient maintenant les données extraites
+                    log("INFO", "app", "Lancement du rapprochement")
                     excel_buffer, pdf_bytes, stats = rapp.executer_rapprochement(df_releve, df_journal, df_etat, date_rapprochement=date_arrete)
+                    log("INFO", "app", "Rapprochement Excel/PDF généré", {"stats": stats})
 
                     # Sauvegarde des RÉSULTATS dans Supabase Storage (Cloud)
                     url_excel = auth_manager.upload_to_storage(
@@ -765,13 +829,10 @@ else:
                              content_type="application/pdf"
                          )
 
-                    # Mise à jour Crédits et Historique
-                    auth_manager.decrement_credits(user_id)
-                    
+                    # Sauvegarde de l'historique (le crédit a déjà été décrémenté en début de traitement)
                     date_display = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
-                    
+
                     # On sauvegarde les URLs publiques dans l'historique
-                    # Note: Si l'upload échoue (url=None), on aura None en base, ce qui est acceptable pour l'instant.
                     auth_manager.add_history_remote(user_id, {
                         'url_excel': url_excel,
                         'url_pdf': url_pdf,
@@ -780,9 +841,6 @@ else:
                         'mois': mois_rapprochement
                     })
 
-
-                    # Invalidation explicite du cache historique
-                    # auth_manager.get_history.clear()
 
                     # NETTOYAGE DES FICHIERS TEMPORAIRES ET SOURCE
                     # Uniquement si un PDF a été traité (temp_pdf_path défini)
@@ -805,6 +863,7 @@ else:
                     }
                     
                 except Exception as e:
+                    log("CRITICAL", "app", "Erreur non gérée lors du traitement principal", exc=e)
                     st.error(f"Une erreur est survenue lors du traitement : {e}")
 
     # --- AFFICHAGE PERSISTANT DES RÉSULTATS ---
@@ -871,20 +930,21 @@ else:
             # Déjà fait par le formatage qui retourne des strings
             
             st.subheader("Tableau de Rapprochement")
-            st.dataframe(df_rapp, width=None, use_container_width=True, hide_index=True)
+            st.dataframe(df_rapp, width='stretch', hide_index=True)
             
             with st.expander("Voir les détails des suspens"):
                 excel_buffer.seek(0)
                 st.write("#### Opérations Non Pointées - Journal")
                 df_jn = pd.read_excel(excel_buffer, sheet_name='JOURNAL_NON_POINTEE', dtype=str).fillna("")
-                st.dataframe(df_jn, use_container_width=True)
+                st.dataframe(df_jn, width='stretch')
 
                 excel_buffer.seek(0)
                 st.write("#### Opérations Non Pointées - Relevé")
                 df_rn = pd.read_excel(excel_buffer, sheet_name='RELEVE_NON_POINTEE', dtype=str).fillna("")
-                st.dataframe(df_rn, use_container_width=True)
+                st.dataframe(df_rn, width='stretch')
                 
         except Exception as e:
+            log("ERROR", "app", "Erreur lors de l'affichage de l'aperçu Excel", exc=e)
             st.warning(f"Impossible d'afficher l'aperçu complet : {e}")
 
 

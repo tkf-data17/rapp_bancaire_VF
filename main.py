@@ -1,10 +1,13 @@
 import os
+import re
 import shutil
 import sys
 import time
 import config
 from split_pdf import generate_ocr_split
-from extract_table import batch_process_pdf_folder, process_all_pdf_files, get_solde_precedent
+from extract_table import batch_process_pdf_folder, process_all_pdf_files
+from extractors import BankExtractorFactory
+from _00_logger import log
 
 # =================================================================================================
 # SCRIPT PRINCIPAL : ORCHESTRATION DU FLUX DE TRAVAIL (PIPELINE)
@@ -21,18 +24,18 @@ def run_extraction_pipeline(input_pdf_path, bank_name=None, status_callback=None
     Retourne le chemin du fichier Excel consolidé généré.
     """
     
-    # Vérification de la banque supportée
-    if bank_name and bank_name.strip().lower() != "orabank":
-        raise ValueError(f"Désolé, cette banque ({bank_name}) n'a pas encore été paramétrée.")
+    log("INFO", "main", "Pipeline démarré", {"pdf": input_pdf_path, "banque": bank_name})
+
+    extractor = BankExtractorFactory.get(bank_name or "orabank")
+    log("INFO", "main", "Extracteur sélectionné", {"type": type(extractor).__name__})
     
     # -------------------------------------------------------------------------
     # ÉTAPE 0 : PRÉPARATION
     # -------------------------------------------------------------------------
-    print("\n" + "="*80)
-    print(f"🚀 DÉMARRAGE DU TRAITEMENT : {input_pdf_path}")
-    print("="*80)
+    log("INFO", "main", "=== DÉMARRAGE DU TRAITEMENT ===", {"pdf": input_pdf_path})
 
     if not os.path.exists(input_pdf_path):
+        log("ERROR", "main", "Fichier PDF introuvable", {"path": input_pdf_path})
         raise FileNotFoundError(f"Le fichier source '{input_pdf_path}' est introuvable.")
 
     start_time = time.time()
@@ -56,43 +59,34 @@ def run_extraction_pipeline(input_pdf_path, bank_name=None, status_callback=None
     # -------------------------------------------------------------------------
     # ÉTAPE 1 : DÉCOUPAGE DU DOCUMENT SOURCE (MODE NATIF)
     # -------------------------------------------------------------------------
-    print("\n" + "-"*50)
-    print("📍 ÉTAPE 1 : Découpage du document source (sans OCR)")
-    print("-"*50)
+    log("INFO", "main", "ÉTAPE 1 : Découpage du document source (sans OCR)")
     
     # Appel Split
     if status_callback: status_callback("Découpage des pages...")
     ocr_result_dir = generate_ocr_split(input_pdf_path, ocr_output_dir, progress_callback=status_callback)
     
     if not ocr_result_dir:
-        print("❌ CRITICAL: Split result dir is None.")
+        log("CRITICAL", "main", "Split result dir est None — échec découpage PDF")
         raise RuntimeError("Échec du découpage du fichier PDF.")
-        
-    print(f"✅ Étape 1 terminée. Pages disponibles dans : {ocr_result_dir}")
+
+    log("INFO", "main", "Étape 1 terminée", {"ocr_dir": ocr_result_dir})
 
     # -------------------------------------------------------------------------
     # ÉTAPE 2 : EXTRACTION DES DONNÉES STRUCTURÉES (TABLEAUX)
     # -------------------------------------------------------------------------
-    print("\n" + "-"*50)
-    print("📍 ÉTAPE 2 : Extraction des transactions bancaires")
-    print("-"*50)
+    log("INFO", "main", "ÉTAPE 2 : Extraction des transactions bancaires")
 
     # Extraction vers CSV intermédiaires
     if status_callback: status_callback("Extraction des tableaux (Parsing)...")
-    batch_process_pdf_folder(ocr_result_dir, output_dir=csv_output_dir)
+    batch_process_pdf_folder(ocr_result_dir, output_dir=csv_output_dir, extractor=extractor)
     
-    print("✅ Étape 2 terminée. Fichiers intermédiaires générés.")
+    log("INFO", "main", "Étape 2 terminée — fichiers intermédiaires générés", {"csv_dir": csv_output_dir})
 
     # -------------------------------------------------------------------------
     # ÉTAPE 3 : CONSOLIDATION ET GÉNÉRATION DU RAPPORT FINAL
     # -------------------------------------------------------------------------
-    print("\n" + "-"*50)
-    print("📍 ÉTAPE 3 : Fusion et création du fichier final")
-    print("-"*50)
+    log("INFO", "main", "ÉTAPE 3 : Fusion et création du fichier final")
 
-    # Fusion
-    import re
-    
     start_solde = None
     try:
         # Identifier la première page (page_1.pdf) pour extraire le solde initial
@@ -102,21 +96,20 @@ def run_extraction_pipeline(input_pdf_path, bank_name=None, status_callback=None
             pdf_files.sort(key=lambda f: int(re.search(r'\d+', f).group()) if re.search(r'\d+', f) else 999)
             first_page_path = os.path.join(ocr_result_dir, pdf_files[0])
             
-            print(f"💰 Recherche du solde initial dans : {first_page_path}")
-            start_solde = get_solde_precedent(first_page_path)
-            print(f"   => Solde initial trouvé : {start_solde:,.0f}")
+            log("INFO", "main", "Recherche solde initial", {"page": first_page_path})
+            start_solde = extractor.get_solde_precedent(first_page_path)
+            log("INFO", "main", "Solde initial détecté", {"solde": start_solde})
     except Exception as e:
-        print(f"⚠️ Erreur lors de la détection du solde initial : {e}")
+        log("WARN", "main", "Erreur lors de la détection du solde initial", exc=e)
 
     final_df = process_all_pdf_files(csv_output_dir, base_name, start_solde=start_solde)
 
     if not final_df.empty:
         elapsed_time = time.time() - start_time
-        print("\n" + "="*80)
-        print("✨ TRAITEMENT TERMINÉ AVEC SUCCÈS")
-        print(f"⏱️  Durée totale : {elapsed_time:.1f} secondes")
-        print(f"📊 Total transactions extraites : {len(final_df)}")
-        print("="*80)
+        log("INFO", "main", "TRAITEMENT TERMINÉ AVEC SUCCÈS", {
+            "duree_s": round(elapsed_time, 1),
+            "nb_transactions": len(final_df)
+        })
         
         # Retourne le chemin complet du fichier Excel
         output_excel_path = os.path.join(csv_output_dir, f"{base_name}.xlsx")
@@ -131,7 +124,7 @@ def run_extraction_pipeline(input_pdf_path, bank_name=None, status_callback=None
                 return output_csv_path
             
     else:
-        print("\n⚠️  Attention : Le fichier final semble vide ou n'a pas été généré.")
+        log("WARN", "main", "Le fichier final semble vide ou n'a pas été généré")
         return None
 
 def cleanup_extraction_artifacts(input_pdf_path):
@@ -143,40 +136,38 @@ def cleanup_extraction_artifacts(input_pdf_path):
         # 1. Suppression du fichier PDF source
         if os.path.exists(input_pdf_path):
             os.remove(input_pdf_path)
-            print(f"🗑️ Fichier source supprimé : {input_pdf_path}")
-            
+            log("INFO", "main", "Fichier source supprimé", {"path": input_pdf_path})
+
         # 2. Suppression du dossier de traitement
         base_name = os.path.splitext(os.path.basename(input_pdf_path))[0]
         safe_name = "".join([c for c in base_name if c.isalnum() or c in (' ', '-', '_')]).strip()
         proc_dir = os.path.join("temp_proc", safe_name)
-        
+
         if os.path.exists(proc_dir):
             shutil.rmtree(proc_dir)
-            print(f"🧹 Dossier temporaire nettoyé : {proc_dir}")
-            
+            log("INFO", "main", "Dossier temporaire nettoyé", {"dir": proc_dir})
+
     except Exception as e:
-        print(f"⚠️ Erreur lors du nettoyage : {e}")
+        log("WARN", "main", "Erreur lors du nettoyage des artefacts", exc=e)
 
 def main():
     """
     Point d'entrée pour l'exécution directe via python main.py
     """
     if not os.path.exists(config.input_pdf):
-        print(f"❌ Erreur critique : Le fichier source '{config.input_pdf}' est introuvable.")
+        log("CRITICAL", "main", "Fichier source introuvable — arrêt", {"path": config.input_pdf})
         sys.exit(1)
-        
+
     try:
         run_extraction_pipeline(config.input_pdf)
     except Exception as e:
-        print(f"Erreur main : {e}")
+        log("CRITICAL", "main", "Erreur fatale dans main()", exc=e)
 
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\n🛑 Interruption par l'utilisateur.")
+        log("WARN", "main", "Interruption manuelle par l'utilisateur (KeyboardInterrupt)")
     except Exception as e:
-        print(f"\n❌ Une erreur inattendue est survenue : {e}")
-        import traceback
-        traceback.print_exc()
+        log("CRITICAL", "main", "Erreur inattendue au point d'entrée", exc=e)
